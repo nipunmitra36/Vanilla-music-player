@@ -1,0 +1,6 @@
+{
+  "name": "Vanilla",
+  "description": "Smooth and professional offline music player with custom equalizer, high-fidelity audio engine, playlists, and synchronized lyrics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
