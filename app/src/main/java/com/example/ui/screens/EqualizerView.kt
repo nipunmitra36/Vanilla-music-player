@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -210,6 +211,33 @@ fun EqualizerView(
                         checkedTrackColor = colors.accent
                     ),
                     modifier = Modifier.testTag("bass_boost_switch")
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // External Equalizer Option
+            Button(
+                onClick = { viewModel.launchExternalEqualizer() },
+                colors = ButtonDefaults.buttonColors(containerColor = colors.selectedBackground),
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .testTag("external_equalizer_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Tune,
+                    contentDescription = "External Equalizer",
+                    tint = colors.accent,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Launch System Equalizer",
+                    color = colors.textPrimary,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
                 )
             }
         }

@@ -14,7 +14,8 @@ data class Song(
     val audioPreset: String = "ambient", // preset for audio synth
     val isFavorite: Boolean = false,
     val orderIndex: Int = 0,
-    val lyrics: String = "No lyrics found" // Synchronized/scrolling lyrics
+    val lyrics: String = "No lyrics found", // Synchronized/scrolling lyrics
+    val artworkUri: String? = null // Real external audio album art URI string
 )
 
 @Entity(tableName = "playlists")

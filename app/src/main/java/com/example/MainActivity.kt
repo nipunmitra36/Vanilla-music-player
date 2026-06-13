@@ -29,14 +29,80 @@ import com.example.ui.MusicViewModel
 import com.example.ui.ScreenState
 import com.example.ui.screens.*
 import com.example.ui.theme.MyApplicationTheme
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import androidx.activity.compose.BackHandler
 
 class MainActivity : ComponentActivity() {
+    private var mainViewModel: MusicViewModel? = null
+
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            results[Manifest.permission.READ_MEDIA_AUDIO] == true
+        } else {
+            results[Manifest.permission.READ_EXTERNAL_STORAGE] == true
+        }
+        if (granted) {
+            mainViewModel?.scanMedia()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
                 val viewModel: MusicViewModel = viewModel()
+                mainViewModel = viewModel
+
+                val selectedTab by viewModel.selectedTab.collectAsState()
+                var showExitDialog by remember { mutableStateOf(false) }
+
+                BackHandler(enabled = true) {
+                    when (viewModel.currentScreen.value) {
+                        ScreenState.SETTINGS -> viewModel.navigateTo(ScreenState.HOME)
+                        ScreenState.EQUALIZER -> viewModel.navigateTo(ScreenState.NOW_PLAYING)
+                        ScreenState.NOW_PLAYING -> viewModel.navigateTo(ScreenState.HOME)
+                        ScreenState.HOME -> {
+                            if (selectedTab != "Songs") {
+                                viewModel.selectTab("Songs")
+                            } else {
+                                showExitDialog = true
+                            }
+                        }
+                    }
+                }
+
+                // Safe permission request when UI starts composition and activity is STARTED/RESUMED
+                LaunchedEffect(Unit) {
+                    try {
+                        // Tiny delay to ensure lifecycle reaches STARTED/RESUMED before launching permission Launcher
+                        kotlinx.coroutines.delay(600)
+                        
+                        val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            arrayOf(Manifest.permission.READ_MEDIA_AUDIO, Manifest.permission.POST_NOTIFICATIONS)
+                        } else {
+                            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+                        }
+
+                        val toRequest = permissions.filter {
+                            ContextCompat.checkSelfPermission(this@MainActivity, it) != PackageManager.PERMISSION_GRANTED
+                        }
+
+                        if (toRequest.isNotEmpty()) {
+                            permissionLauncher.launch(toRequest.toTypedArray())
+                        }
+                    } catch (e: Throwable) {
+                        e.printStackTrace()
+                    }
+                }
+
                 val currentScreen by viewModel.currentScreen.collectAsState()
                 val themeMode by viewModel.themeMode.collectAsState()
                 val setupGuideCompleted by viewModel.setupGuideCompleted.collectAsState()
@@ -102,6 +168,32 @@ class MainActivity : ComponentActivity() {
                         SetupGuideDialog(
                             colors = colors,
                             onComplete = { viewModel.setSetupGuideCompleted(true) }
+                        )
+                    }
+
+                    // Exit confirmation Dialog
+                    if (showExitDialog) {
+                        AlertDialog(
+                            onDismissRequest = { showExitDialog = false },
+                            title = { Text("Exit", color = colors.textPrimary, fontWeight = FontWeight.Bold) },
+                            text = { Text("Are you sure you want to exit?", color = colors.textPrimary) },
+                            containerColor = colors.surface,
+                            confirmButton = {
+                                Button(
+                                    onClick = {
+                                        showExitDialog = false
+                                        finish()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = colors.accent)
+                                ) {
+                                    Text("Yes", color = Color.White)
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showExitDialog = false }) {
+                                    Text("No", color = colors.accent)
+                                }
+                            }
                         )
                     }
                 }

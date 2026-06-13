@@ -34,10 +34,10 @@ fun SettingsView(
     val scannedFilesCount by viewModel.scannedFilesCount.collectAsState()
     val themeMode by viewModel.themeMode.collectAsState()
 
-    var showAboutDialog by varRange(false)
-    var showThemeDialog by varRange(false)
-    var showLyricsDialog by varRange(false)
-    var lyricScrollSpeed by varRange("Normal")
+    var showAboutDialog by remember { mutableStateOf(false) }
+    var showThemeDialog by remember { mutableStateOf(false) }
+    var showLyricsDialog by remember { mutableStateOf(false) }
+    var lyricScrollSpeed by remember { mutableStateOf("Normal") }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -267,6 +267,7 @@ fun SettingsView(
     }
 
     // About Dialog
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
     if (showAboutDialog) {
         AlertDialog(
             onDismissRequest = { showAboutDialog = false },
@@ -286,7 +287,71 @@ fun SettingsView(
                         fontSize = 12.sp,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
-                    Spacer(modifier = Modifier.height(10.dp))
+                    
+                    Spacer(modifier = Modifier.height(4.dp))
+                    HorizontalDivider(color = colors.textSecondary.copy(alpha = 0.2f))
+                    Spacer(modifier = Modifier.height(4.dp))
+                    
+                    Text("Developer Profile", color = colors.accent, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(colors.background)
+                            .padding(12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text("Nipun Mitra", color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        Text("Software Developer", color = colors.textSecondary, fontSize = 12.sp)
+                        
+                        Spacer(modifier = Modifier.height(4.dp))
+                        
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { uriHandler.openUri("mailto:nipunmitra03@gmail.com") }
+                                .padding(vertical = 4.dp, horizontal = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(Icons.Default.Email, contentDescription = "Email", tint = colors.accent, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("nipunmitra03@gmail.com", color = colors.textPrimary, fontSize = 11.sp)
+                        }
+                        
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { uriHandler.openUri("https://www.linkedin.com/in/nipunmitra/") }
+                                .padding(vertical = 4.dp, horizontal = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(Icons.Default.Link, contentDescription = "LinkedIn", tint = colors.accent, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("linkedin.com/in/nipunmitra", color = colors.textPrimary, fontSize = 11.sp)
+                        }
+                        
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { uriHandler.openUri("https://wa.me/8801761227436") }
+                                .padding(vertical = 4.dp, horizontal = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(Icons.Default.Call, contentDescription = "WhatsApp", tint = colors.accent, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("+880 1761 227436 (WhatsApp)", color = colors.textPrimary, fontSize = 11.sp)
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text("Developed for high performance under local SQLite Room cache.", color = colors.textSecondary, fontSize = 11.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 }
             },

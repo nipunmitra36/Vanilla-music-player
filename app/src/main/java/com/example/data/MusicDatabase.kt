@@ -14,8 +14,14 @@ interface SongDao {
     @Update
     suspend fun updateSong(song: Song)
 
+    @Delete
+    suspend fun deleteSong(song: Song)
+
     @Query("SELECT * FROM songs WHERE id = :id")
     suspend fun getSongById(id: String): Song?
+
+    @Query("SELECT * FROM songs LIMIT 1")
+    suspend fun getFirstSong(): Song?
 }
 
 @Dao
@@ -34,6 +40,9 @@ interface PlaylistDao {
 
     @Query("DELETE FROM playlist_song_cross_ref WHERE playlistId = :playlistId AND songId = :songId")
     suspend fun removeSongFromPlaylist(playlistId: Long, songId: String)
+
+    @Query("DELETE FROM playlist_song_cross_ref WHERE songId = :songId")
+    suspend fun deleteCrossRefsForSong(songId: String)
 
     @Query("""
         SELECT s.* FROM songs s
@@ -61,7 +70,7 @@ interface EqualizerDao {
 
 @Database(
     entities = [Song::class, Playlist::class, PlaylistSongCrossRef::class, EqualizerState::class],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class MusicDatabase : RoomDatabase() {

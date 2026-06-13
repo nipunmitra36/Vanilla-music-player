@@ -28,6 +28,8 @@ import androidx.compose.ui.unit.sp
 import com.example.data.Song
 import com.example.ui.MusicViewModel
 import com.example.ui.ScreenState
+import coil.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
 
 @Composable
 fun NowPlayingView(
@@ -40,6 +42,7 @@ fun NowPlayingView(
     val currentPositionSeconds by viewModel.currentPositionSeconds.collectAsState()
     val trackDurationSeconds by viewModel.trackDurationSeconds.collectAsState()
     val isLyricsExpanded by viewModel.isLyricsExpanded.collectAsState()
+    val repeatMode by viewModel.repeatMode.collectAsState()
 
     if (activeSong == null) {
         Box(
@@ -93,7 +96,7 @@ fun NowPlayingView(
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        Color(android.graphics.Color.parseColor(song.artworkColorHex)).copy(alpha = 0.5f),
+                        safeParseColor(song.artworkColorHex).copy(alpha = 0.5f),
                         colors.background
                     )
                 )
@@ -176,24 +179,33 @@ fun NowPlayingView(
                         .aspectRatio(1f)
                         .scale(if (isPlaying) 1.02f else 0.98f)
                         .clip(RoundedCornerShape(24.dp))
-                        .background(Color(android.graphics.Color.parseColor(song.artworkColorHex)))
+                        .background(safeParseColor(song.artworkColorHex))
                         .testTag("artwork_card"),
                     contentAlignment = Alignment.Center
                 ) {
-                    // Custom aesthetic vector drawings
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize(0.6f)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.08f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.MusicNote,
-                            contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.6f),
-                            modifier = Modifier.size(80.dp)
-                        )
+                    AsyncImage(
+                        model = getFeaturedImageSource(song),
+                        contentDescription = "Active song featured image",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                        error = androidx.compose.ui.graphics.painter.ColorPainter(Color.Transparent)
+                    )
+                    // Custom aesthetic vector overlay fallback when empty MediaStore art
+                    if (song.artworkUri.isNullOrBlank() && song.id.startsWith("external")) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize(0.6f)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.08f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.MusicNote,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.6f),
+                                modifier = Modifier.size(80.dp)
+                            )
+                        }
                     }
                 }
 
@@ -269,17 +281,26 @@ fun NowPlayingView(
                 // Media Playback Transport Controllers Row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // Repeat mode toggle
                     IconButton(
-                        onClick = { viewModel.toggleFavorite(song) },
-                        modifier = Modifier.testTag("favorite_button")
+                        onClick = { viewModel.toggleRepeatMode() },
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("repeat_toggle_button")
                     ) {
                         Icon(
-                            imageVector = if (song.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                            contentDescription = "Favorite Toggle",
-                            tint = if (song.isFavorite) Color.Red else colors.textPrimary,
+                            imageVector = when (repeatMode) {
+                                com.example.ui.RepeatMode.ONE -> Icons.Default.RepeatOne
+                                else -> Icons.Default.Repeat
+                            },
+                            contentDescription = "Toggle Repeat Options",
+                            tint = when (repeatMode) {
+                                com.example.ui.RepeatMode.NONE -> colors.textSecondary.copy(alpha = 0.4f)
+                                else -> colors.accent
+                            },
                             modifier = Modifier.size(24.dp)
                         )
                     }
@@ -330,14 +351,17 @@ fun NowPlayingView(
                         )
                     }
 
+                    // Heart toggle
                     IconButton(
-                        onClick = { viewModel.selectTab("Play queue"); viewModel.navigateTo(ScreenState.HOME) },
-                        modifier = Modifier.testTag("view_queue_shortcuts")
+                        onClick = { viewModel.toggleFavorite(song) },
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("favorite_button")
                     ) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.PlaylistPlay,
-                            contentDescription = "Playlist Queue",
-                            tint = colors.textPrimary,
+                            imageVector = if (song.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                            contentDescription = "Favorite Toggle",
+                            tint = if (song.isFavorite) Color.Red else colors.textPrimary,
                             modifier = Modifier.size(24.dp)
                         )
                     }
