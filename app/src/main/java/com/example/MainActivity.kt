@@ -52,6 +52,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra("OPEN_NOW_PLAYING", false)) {
+            mainViewModel?.navigateTo(ScreenState.NOW_PLAYING)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
@@ -61,11 +69,18 @@ class MainActivity : ComponentActivity() {
                 val viewModel: MusicViewModel = viewModel()
                 mainViewModel = viewModel
 
+                LaunchedEffect(intent) {
+                    if (intent?.getBooleanExtra("OPEN_NOW_PLAYING", false) == true) {
+                        viewModel.navigateTo(ScreenState.NOW_PLAYING)
+                    }
+                }
+
                 val selectedTab by viewModel.selectedTab.collectAsState()
                 var showExitDialog by remember { mutableStateOf(false) }
 
                 BackHandler(enabled = true) {
                     when (viewModel.currentScreen.value) {
+                        ScreenState.PLAYLIST_DETAILS -> viewModel.navigateTo(ScreenState.HOME)
                         ScreenState.SETTINGS -> viewModel.navigateTo(ScreenState.HOME)
                         ScreenState.EQUALIZER -> viewModel.navigateTo(ScreenState.NOW_PLAYING)
                         ScreenState.NOW_PLAYING -> viewModel.navigateTo(ScreenState.HOME)
@@ -109,6 +124,14 @@ class MainActivity : ComponentActivity() {
 
                 // Resolve active design colors
                 val colors = when (themeMode) {
+                    "Serene Alabaster" -> ColorPalette(
+                        background = Color(0xFFF8FAFC),
+                        surface = Color(0xFFFFFFFF),
+                        selectedBackground = Color(0xFFF1F5F9),
+                        accent = Color(0xFF0F766E),
+                        textPrimary = Color(0xFF0F172A),
+                        textSecondary = Color(0xFF475569)
+                    )
                     "Slate Gray" -> ColorPalette(
                         background = Color(0xFF121214),
                         surface = Color(0xFF1E1E22),
@@ -139,27 +162,80 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = colors.background
                 ) {
-                    // Modern screen crossfade animated transition
-                    AnimatedContent(
-                        targetState = currentScreen,
-                        transitionSpec = {
-                            fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(220))
-                        },
-                        label = "MainViewTransitions"
-                    ) { state ->
-                        when (state) {
-                            ScreenState.HOME -> {
-                                HomeView(viewModel = viewModel, colors = colors)
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        // Modern screen crossfade animated transition
+                        AnimatedContent(
+                            targetState = currentScreen,
+                            transitionSpec = {
+                                fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(220))
+                            },
+                            label = "MainViewTransitions"
+                        ) { state ->
+                            when (state) {
+                                ScreenState.HOME -> {
+                                    HomeView(viewModel = viewModel, colors = colors)
+                                }
+                                ScreenState.NOW_PLAYING -> {
+                                    NowPlayingView(viewModel = viewModel, colors = colors)
+                                }
+                                ScreenState.EQUALIZER -> {
+                                    EqualizerView(viewModel = viewModel, colors = colors)
+                                }
+                                ScreenState.SETTINGS -> {
+                                    SettingsView(viewModel = viewModel, colors = colors)
+                                }
+                                ScreenState.PLAYLIST_DETAILS -> {
+                                    com.example.ui.screens.PlaylistDetailsView(viewModel = viewModel, colors = colors)
+                                }
                             }
-                            ScreenState.NOW_PLAYING -> {
-                                NowPlayingView(viewModel = viewModel, colors = colors)
+                        }
+
+                        // Mini Player
+                        if (currentScreen != ScreenState.NOW_PLAYING) {
+                            val activeSong by viewModel.activeSong.collectAsState()
+                            val isPlaying by viewModel.isPlaying.collectAsState()
+                            
+                            if (activeSong != null) {
+                                MiniPlayerView(
+                                    song = activeSong!!,
+                                    isPlaying = isPlaying,
+                                    onPlayPause = { viewModel.togglePlayPause() },
+                                    onNext = { viewModel.skipNext() },
+                                    onPrevious = { viewModel.skipPrevious() },
+                                    onClick = { viewModel.navigateTo(ScreenState.NOW_PLAYING) },
+                                    colors = colors,
+                                    modifier = Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .navigationBarsPadding()
+                                        .padding(bottom = 16.dp, start = 16.dp, end = 16.dp)
+                                )
                             }
-                            ScreenState.EQUALIZER -> {
-                                EqualizerView(viewModel = viewModel, colors = colors)
-                            }
-                            ScreenState.SETTINGS -> {
-                                SettingsView(viewModel = viewModel, colors = colors)
-                            }
+                        }
+
+                        // Exit confirmation Dialog
+                        if (showExitDialog) {
+                            AlertDialog(
+                                onDismissRequest = { showExitDialog = false },
+                                title = { Text("Exit", color = colors.textPrimary, fontWeight = FontWeight.Bold) },
+                                text = { Text("Are you sure you want to exit?", color = colors.textPrimary) },
+                                containerColor = colors.surface,
+                                confirmButton = {
+                                    Button(
+                                        onClick = {
+                                            showExitDialog = false
+                                            finish()
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = colors.accent)
+                                    ) {
+                                        Text("Yes", color = Color.White)
+                                    }
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { showExitDialog = false }) {
+                                        Text("No", color = colors.accent)
+                                    }
+                                }
+                            )
                         }
                     }
 
@@ -168,32 +244,6 @@ class MainActivity : ComponentActivity() {
                         SetupGuideDialog(
                             colors = colors,
                             onComplete = { viewModel.setSetupGuideCompleted(true) }
-                        )
-                    }
-
-                    // Exit confirmation Dialog
-                    if (showExitDialog) {
-                        AlertDialog(
-                            onDismissRequest = { showExitDialog = false },
-                            title = { Text("Exit", color = colors.textPrimary, fontWeight = FontWeight.Bold) },
-                            text = { Text("Are you sure you want to exit?", color = colors.textPrimary) },
-                            containerColor = colors.surface,
-                            confirmButton = {
-                                Button(
-                                    onClick = {
-                                        showExitDialog = false
-                                        finish()
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = colors.accent)
-                                ) {
-                                    Text("Yes", color = Color.White)
-                                }
-                            },
-                            dismissButton = {
-                                TextButton(onClick = { showExitDialog = false }) {
-                                    Text("No", color = colors.accent)
-                                }
-                            }
                         )
                     }
                 }
@@ -221,7 +271,7 @@ fun SetupGuideDialog(
         title = {
             Text(
                 text = when(step) {
-                    1 -> "Welcome to Vanilla"
+                    1 -> "Welcome to Musicly"
                     2 -> "Hi-Fi Equalizer Synth"
                     else -> "Offline Playlists Pool"
                 },

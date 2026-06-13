@@ -8,7 +8,7 @@ data class Song(
     @PrimaryKey val id: String,
     val title: String,
     val artist: String,
-    val album: String = "Vanilla Album",
+    val album: String = "Musicly Album",
     val durationSeconds: Int = 244, // Default 04:04
     val artworkColorHex: String = "#1A301D", // Distinct artwork branding
     val audioPreset: String = "ambient", // preset for audio synth

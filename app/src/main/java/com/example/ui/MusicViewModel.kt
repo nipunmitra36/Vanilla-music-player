@@ -12,7 +12,8 @@ enum class ScreenState {
     HOME,
     NOW_PLAYING,
     EQUALIZER,
-    SETTINGS
+    SETTINGS,
+    PLAYLIST_DETAILS
 }
 
 enum class RepeatMode {
@@ -53,11 +54,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _sortDescending = MutableStateFlow(true)
     val sortDescending = _sortDescending.asStateFlow()
 
-    private val _activeSong = MutableStateFlow<Song?>(null)
-    val activeSong = _activeSong.asStateFlow()
+    val activeSong = audioEngine.activeSong
 
-    private val _playQueue = MutableStateFlow<List<Song>>(emptyList())
-    val playQueue = _playQueue.asStateFlow()
+    val playQueue = audioEngine.playQueue
 
     private val _repeatMode = MutableStateFlow(RepeatMode.ALL)
     val repeatMode = _repeatMode.asStateFlow()
@@ -102,13 +101,34 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _setupGuideCompleted = MutableStateFlow(true)
     val setupGuideCompleted = _setupGuideCompleted.asStateFlow()
 
+    private val receiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+            when (intent?.action) {
+                "com.example.musicly.ACTION_PLAY_PAUSE" -> togglePlayPause()
+                "com.example.musicly.ACTION_NEXT" -> skipNext()
+                "com.example.musicly.ACTION_PREVIOUS" -> skipPrevious()
+            }
+        }
+    }
+
     init {
+        val filter = android.content.IntentFilter().apply {
+            addAction("com.example.musicly.ACTION_PLAY_PAUSE")
+            addAction("com.example.musicly.ACTION_NEXT")
+            addAction("com.example.musicly.ACTION_PREVIOUS")
+        }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            getApplication<Application>().registerReceiver(receiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            getApplication<Application>().registerReceiver(receiver, filter)
+        }
+
         // Wire completion listener to handle next track or looping automatically based on repeat settings
         audioEngine.setOnSongCompletionListener {
             viewModelScope.launch {
                 val mode = _repeatMode.value
-                val current = _activeSong.value
-                val queue = _playQueue.value
+                val current = audioEngine.activeSong.value
+                val queue = audioEngine.playQueue.value
                 if (current == null || queue.isEmpty()) return@launch
 
                 when (mode) {
@@ -170,25 +190,25 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 allSongs.collect { songs ->
                     if (songs.isNotEmpty()) {
                         // Keep current queue filtered to only contain existing database songs
-                        _playQueue.value = _playQueue.value.filter { q -> songs.any { s -> s.id == q.id } }
-                        if (_playQueue.value.isEmpty()) {
-                            _playQueue.value = songs
+                        audioEngine.playQueue.value = audioEngine.playQueue.value.filter { q -> songs.any { s -> s.id == q.id } }
+                        if (audioEngine.playQueue.value.isEmpty()) {
+                            audioEngine.playQueue.value = songs
                         }
                         // set default first song (but don't autoplay until tapped)
-                        if (_activeSong.value == null) {
+                        if (audioEngine.activeSong.value == null) {
                             setSong(songs.first(), autoplay = false)
-                        } else if (!songs.any { it.id == _activeSong.value?.id }) {
+                        } else if (!songs.any { it.id == audioEngine.activeSong.value?.id }) {
                             // Active song was deleted, load first available
                             val nextFirst = songs.firstOrNull()
                             if (nextFirst != null) {
                                 setSong(nextFirst, autoplay = false)
                             } else {
-                                _activeSong.value = null
+                                audioEngine.activeSong.value = null
                             }
                         }
                     } else {
-                        _playQueue.value = emptyList()
-                        _activeSong.value = null
+                        audioEngine.playQueue.value = emptyList()
+                        audioEngine.activeSong.value = null
                     }
                 }
             } catch (e: Throwable) {
@@ -215,14 +235,21 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectPlaylist(playlist: Playlist?) {
         _selectedPlaylist.value = playlist
+        if (playlist != null) {
+            navigateTo(ScreenState.PLAYLIST_DETAILS)
+        }
     }
 
     private fun startMusicService(song: Song) {
         try {
             val intent = android.content.Intent(getApplication(), com.example.audio.MusicService::class.java).apply {
                 action = "START"
+                putExtra("SONG_ID", song.id)
+                putExtra("SONG_ARTWORK", song.artworkUri)
                 putExtra("SONG_TITLE", song.title)
                 putExtra("SONG_ARTIST", song.artist)
+                putExtra("SONG_COLOR", song.artworkColorHex)
+                putExtra("IS_PLAYING", isPlaying.value)
             }
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                 getApplication<Application>().startForegroundService(intent)
@@ -231,6 +258,26 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             }
         } catch (e: Throwable) {
             android.util.Log.e("MusicViewModel", "Error starting MusicService", e)
+        }
+    }
+
+    private fun updateMusicService(song: Song) {
+        try {
+            val intent = android.content.Intent(getApplication(), com.example.audio.MusicService::class.java).apply {
+                action = "UPDATE"
+                putExtra("SONG_ID", song.id)
+                putExtra("SONG_ARTWORK", song.artworkUri)
+                putExtra("SONG_TITLE", song.title)
+                putExtra("SONG_ARTIST", song.artist)
+                putExtra("SONG_COLOR", song.artworkColorHex)
+                putExtra("IS_PLAYING", isPlaying.value)
+            }
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                getApplication<Application>().startForegroundService(intent)
+            } else {
+                getApplication<Application>().startService(intent)
+            }
+        } catch (e: Throwable) {
         }
     }
 
@@ -245,23 +292,38 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun playPlaylist(playlist: Playlist) {
+        viewModelScope.launch {
+            val songs = repository.getSongsForPlaylistSync(playlist.id)
+            if (songs.isNotEmpty()) {
+                playSongFromList(songs.first(), songs)
+            }
+        }
+    }
+
+    fun playSongFromList(song: Song, list: List<Song>, autoplay: Boolean = true) {
+        audioEngine.playQueue.value = list
+        setSong(song, autoplay)
+    }
+
     fun setSong(song: Song, autoplay: Boolean = true) {
-        _activeSong.value = song
+        audioEngine.activeSong.value = song
         audioEngine.setSong(song.id, song.audioPreset, song.durationSeconds)
         if (autoplay) {
             audioEngine.play()
             startMusicService(song)
         } else {
             audioEngine.pause()
-            stopMusicService()
         }
     }
 
     fun togglePlayPause() {
-        val song = _activeSong.value
+        val song = audioEngine.activeSong.value
         if (isPlaying.value) {
             audioEngine.pause()
-            stopMusicService()
+            if (song != null) {
+                updateMusicService(song)
+            }
         } else {
             audioEngine.play()
             if (song != null) {
@@ -271,25 +333,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun skipNext() {
-        val queue = _playQueue.value
-        val current = _activeSong.value
-        if (queue.isEmpty() || current == null) return
-        val index = queue.indexOfFirst { it.id == current.id }
-        if (index != -1) {
-            val nextIndex = (index + 1) % queue.size
-            setSong(queue[nextIndex])
-        }
+        audioEngine.skipNext()
     }
 
     fun skipPrevious() {
-        val queue = _playQueue.value
-        val current = _activeSong.value
-        if (queue.isEmpty() || current == null) return
-        val index = queue.indexOfFirst { it.id == current.id }
-        if (index != -1) {
-            val prevIndex = if (index - 1 < 0) queue.size - 1 else index - 1
-            setSong(queue[prevIndex])
-        }
+        audioEngine.skipPrevious()
     }
 
     fun seekTo(seconds: Int) {
@@ -300,8 +348,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.updateSongFavorite(song.id, !song.isFavorite)
             // Sync with local active song reference
-            if (_activeSong.value?.id == song.id) {
-                _activeSong.value = song.copy(isFavorite = !song.isFavorite)
+            if (audioEngine.activeSong.value?.id == song.id) {
+                audioEngine.activeSong.value = song.copy(isFavorite = !song.isFavorite)
             }
         }
     }
@@ -316,8 +364,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteSong(song: Song) {
         viewModelScope.launch {
-            val currentActive = _activeSong.value
-            val currentQueue = _playQueue.value
+            val currentActive = audioEngine.activeSong.value
+            val currentQueue = audioEngine.playQueue.value
             
             // If deleting active song, pause and load next track
             if (currentActive?.id == song.id) {
@@ -327,7 +375,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     val nextIndex = if (index + 1 < currentQueue.size) index + 1 else 0
                     setSong(currentQueue[nextIndex], autoplay = false)
                 } else {
-                    _activeSong.value = null
+                    audioEngine.activeSong.value = null
                 }
             }
 
@@ -335,56 +383,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             repository.deleteSong(song)
 
             // Filter out of current queue state
-            _playQueue.value = _playQueue.value.filter { it.id != song.id }
-        }
-    }
-
-    fun downloadCustomSong(title: String, artist: String, artworkUrl: String? = null) {
-        viewModelScope.launch {
-            val randomId = "download_" + System.currentTimeMillis()
-            val finalArtUrl = artworkUrl ?: when {
-                title.contains("Kesariya", ignoreCase = true) -> "https://images.unsplash.com/photo-1518609878373-06d740f60d8b?q=80&w=400"
-                title.contains("Pasoori", ignoreCase = true) -> "https://images.unsplash.com/photo-1498038432885-c6f3f1b912ee?q=80&w=400"
-                title.contains("Senorita", ignoreCase = true) -> "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?q=80&w=400"
-                title.contains("Shape", ignoreCase = true) -> "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?q=80&w=400"
-                title.contains("Believer", ignoreCase = true) -> "https://images.unsplash.com/photo-1446776811953-b23d57bd21aa?q=80&w=400"
-                else -> {
-                    val fallbackArts = listOf(
-                        "https://images.unsplash.com/photo-1506157786151-b8491531f063?q=80&w=400",
-                        "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?q=80&w=400",
-                        "https://images.unsplash.com/photo-1459749411175-04bf5292ceea?q=80&w=400",
-                        "https://images.unsplash.com/photo-1487180142328-054b783fc471?q=80&w=400",
-                        "https://images.unsplash.com/photo-1513829096960-ef9a314d3ac5?q=80&w=400"
-                    )
-                    fallbackArts.random()
-                }
-            }
-
-            val simulatedLyrics = """
-                [00:15] Cruising down the offline highway...
-                [00:35] High-fidelity notes singing my way.
-                [00:55] Feel the soft synthesizer ripple inside,
-                [01:15] With high-contrast themes we glide.
-                [01:45] Deep acoustic echoes and premium bass,
-                [02:05] Music is our personal timeline space.
-                [02:30] Bring the beat back again!
-                [02:50] Serene end of the downloaded masterpiece.
-            """.trimIndent()
-
-            val downloadedSong = Song(
-                id = randomId,
-                title = title,
-                artist = artist,
-                album = "Cloud Downloads",
-                durationSeconds = 188,
-                artworkColorHex = "#2E1B4E", // Sleek deep purple artwork
-                audioPreset = listOf("ambient", "jazz", "electronic", "rock").random(),
-                isFavorite = false,
-                lyrics = simulatedLyrics,
-                artworkUri = finalArtUrl
-            )
-
-            repository.addDownloadedSong(downloadedSong)
+            audioEngine.playQueue.value = audioEngine.playQueue.value.filter { it.id != song.id }
         }
     }
 
@@ -404,9 +403,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun addSongToPlaylist(playlistId: Long, songId: String) {
+    fun addSongToPlaylist(playlistId: Long, song: Song) {
         viewModelScope.launch {
-            repository.addSongToPlaylist(playlistId, songId)
+            repository.addSongToPlaylist(playlistId, song)
         }
     }
 
@@ -416,9 +415,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private val _activeEqPreset = MutableStateFlow("Custom")
+    val activeEqPreset = _activeEqPreset.asStateFlow()
+
     // Equalizer Controls
     fun updateEqualizerBand(band: String, value: Float) {
         viewModelScope.launch {
+            _activeEqPreset.value = "Custom"
             val oldState = _equalizerState.value
             val newState = when(band) {
                 "60Hz" -> oldState.copy(band60Hz = value)
@@ -437,6 +440,29 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleEqualizer(isEnabled: Boolean) {
         viewModelScope.launch {
             val newState = _equalizerState.value.copy(isEnabled = isEnabled)
+            _equalizerState.value = newState
+            audioEngine.setEqualizerState(newState)
+            repository.saveEqualizerSettings(newState)
+        }
+    }
+
+    fun applyEqualizerPreset(preset: String) {
+        viewModelScope.launch {
+            _activeEqPreset.value = preset
+            val state = _equalizerState.value
+            val newState = when (preset) {
+                "Balanced" -> state.copy(band60Hz = 0f, band230Hz = 0f, band910Hz = 0f, band3600Hz = 0f, band14000Hz = 0f)
+                "Hall Room" -> state.copy(band60Hz = 3f, band230Hz = 2f, band910Hz = -1f, band3600Hz = 4f, band14000Hz = 5f)
+                "Rock" -> state.copy(band60Hz = 5f, band230Hz = 3f, band910Hz = -2f, band3600Hz = 4f, band14000Hz = 6f)
+                "Classical" -> state.copy(band60Hz = 4f, band230Hz = 3f, band910Hz = -2f, band3600Hz = 4f, band14000Hz = 4f)
+                "Pop" -> state.copy(band60Hz = -1f, band230Hz = 2f, band910Hz = 5f, band3600Hz = 3f, band14000Hz = -1f)
+                "Jazz" -> state.copy(band60Hz = 3f, band230Hz = 2f, band910Hz = -2f, band3600Hz = 3f, band14000Hz = 4f)
+                "Bass Boost" -> state.copy(band60Hz = 8f, band230Hz = 5f, band910Hz = 0f, band3600Hz = 0f, band14000Hz = 0f)
+                "Vocal Boost" -> state.copy(band60Hz = -2f, band230Hz = 0f, band910Hz = 6f, band3600Hz = 4f, band14000Hz = -1f)
+                "Acoustic" -> state.copy(band60Hz = 4f, band230Hz = 1f, band910Hz = 2f, band3600Hz = 3f, band14000Hz = 4f)
+                "Electronic" -> state.copy(band60Hz = 6f, band230Hz = 5f, band910Hz = -2f, band3600Hz = 5f, band14000Hz = 6f)
+                else -> state
+            }
             _equalizerState.value = newState
             audioEngine.setEqualizerState(newState)
             repository.saveEqualizerSettings(newState)

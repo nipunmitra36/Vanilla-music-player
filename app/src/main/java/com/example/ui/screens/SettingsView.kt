@@ -66,6 +66,11 @@ fun SettingsView(
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = colors.background)
             )
+        },
+        bottomBar = {
+            if (viewModel.activeSong.collectAsState().value != null) {
+                Spacer(modifier = Modifier.height(96.dp).navigationBarsPadding())
+            }
         }
     ) { innerPadding ->
         LazyColumn(
@@ -162,10 +167,10 @@ fun SettingsView(
                 )
             }
 
-            // 5. About Vanilla
+            // 5. About Musicly
             item {
                 SettingsItem(
-                    title = "About Vanilla",
+                    title = "About Musicly",
                     subtitle = "Version: 0.2.0-dev09",
                     icon = Icons.Default.Info,
                     iconTint = Color(0xFF3B67AD), // blue circle as in screenshot 3
@@ -196,7 +201,7 @@ fun SettingsView(
             containerColor = colors.surface,
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    listOf("Dark Forest", "Slate Gray", "Midnight Blue").forEach { theme ->
+                    listOf("Dark Forest", "Slate Gray", "Midnight Blue", "Serene Alabaster").forEach { theme ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -272,7 +277,7 @@ fun SettingsView(
         AlertDialog(
             onDismissRequest = { showAboutDialog = false },
             icon = { Icon(Icons.Default.MusicNote, contentDescription = null, tint = colors.accent, modifier = Modifier.size(40.dp)) },
-            title = { Text("Vanilla Music", color = colors.textPrimary, fontWeight = FontWeight.Bold) },
+            title = { Text("Musicly", color = colors.textPrimary, fontWeight = FontWeight.Bold) },
             containerColor = colors.surface,
             text = {
                 Column(

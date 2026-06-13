@@ -1,7 +1,13 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -28,6 +34,7 @@ fun EqualizerView(
     modifier: Modifier = Modifier
 ) {
     val eqState by viewModel.equalizerState.collectAsState()
+    val activePreset by viewModel.activeEqPreset.collectAsState()
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -56,12 +63,18 @@ fun EqualizerView(
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = colors.background)
             )
+        },
+        bottomBar = {
+            if (viewModel.activeSong.collectAsState().value != null) {
+                Spacer(modifier = Modifier.height(96.dp).navigationBarsPadding())
+            }
         }
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .verticalScroll(rememberScrollState())
                 .padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -100,10 +113,69 @@ fun EqualizerView(
             // Disable overlay if EQ is off
             val alpha = if (eqState.isEnabled) 1.0f else 0.4f
             
+            var presetMenuExpanded by remember { mutableStateOf(false) }
+            val presets = listOf("Balanced", "Hall Room", "Rock", "Classical", "Pop", "Jazz", "Bass Boost", "Vocal Boost", "Acoustic", "Electronic", "Custom")
+
+            // Presets Dropdown trigger
+            Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(colors.surface).clickable(enabled = eqState.isEnabled) { presetMenuExpanded = true }.padding(horizontal = 24.dp, vertical = 16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth().alpha(alpha) ) {
+                    Text("Preset: $activePreset", color = colors.textPrimary, fontSize = 16.sp, modifier = Modifier.padding(start = 2.dp), fontWeight = FontWeight.Medium)
+                    Icon(Icons.Default.Tune, contentDescription = "Presets", tint = colors.accent)
+                }
+            }
+
+            if (presetMenuExpanded) {
+                AlertDialog(
+                    onDismissRequest = { presetMenuExpanded = false },
+                    title = {
+                        Text(
+                            text = "Audio FX Presets",
+                            color = colors.textPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 20.sp
+                        )
+                    },
+                    text = {
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp)
+                        ) {
+                            items(presets) { preset ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(if (activePreset == preset) colors.selectedBackground else Color.Transparent)
+                                        .clickable {
+                                            viewModel.applyEqualizerPreset(preset)
+                                            presetMenuExpanded = false
+                                        }
+                                        .padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = preset,
+                                        color = if (activePreset == preset) colors.accent else colors.textPrimary,
+                                        fontSize = 16.sp,
+                                        fontWeight = if (activePreset == preset) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { presetMenuExpanded = false }) {
+                            Text("Close", color = colors.accent)
+                        }
+                    },
+                    containerColor = colors.surface,
+                    shape = RoundedCornerShape(24.dp)
+                )
+            }
+
             Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
+                    .fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 // 60Hz Slider Band
@@ -214,32 +286,34 @@ fun EqualizerView(
                 )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(28.dp))
 
             // External Equalizer Option
             Button(
                 onClick = { viewModel.launchExternalEqualizer() },
                 colors = ButtonDefaults.buttonColors(containerColor = colors.selectedBackground),
-                shape = RoundedCornerShape(20.dp),
+                shape = RoundedCornerShape(16.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp)
+                    .height(56.dp)
                     .testTag("external_equalizer_button")
             ) {
                 Icon(
                     imageVector = Icons.Default.Tune,
                     contentDescription = "External Equalizer",
                     tint = colors.accent,
-                    modifier = Modifier.size(18.dp)
+                    modifier = Modifier.size(20.dp)
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(12.dp))
                 Text(
                     text = "Launch System Equalizer",
                     color = colors.textPrimary,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 16.sp
                 )
             }
+
+            Spacer(modifier = Modifier.height(32.dp))
         }
     }
 }

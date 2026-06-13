@@ -50,6 +50,14 @@ interface PlaylistDao {
         WHERE r.playlistId = :playlistId
         ORDER BY s.orderIndex ASC
     """)
+    suspend fun getSongsForPlaylist(playlistId: Long): List<Song>
+
+    @Query("""
+        SELECT s.* FROM songs s
+        INNER JOIN playlist_song_cross_ref r ON s.id = r.songId
+        WHERE r.playlistId = :playlistId
+        ORDER BY s.orderIndex ASC
+    """)
     fun getSongsForPlaylistFlow(playlistId: Long): Flow<List<Song>>
 
     @Query("SELECT * FROM playlist_song_cross_ref")

@@ -62,11 +62,6 @@ fun HomeView(
     var showSongActionsDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmationDialog by remember { mutableStateOf(false) }
 
-    var showDownloadDialog by remember { mutableStateOf(false) }
-    var isDownloadingSimulated by remember { mutableStateOf(false) }
-    var downloadCustomTitle by remember { mutableStateOf("") }
-    var downloadCustomArtist by remember { mutableStateOf("") }
-
     // Filtered & Sorted Songs logic
     val filteredSongs = remember(allSongs, searchQuery, sortDescending) {
         var list = allSongs.filter {
@@ -115,14 +110,7 @@ fun HomeView(
                         )
                     } else {
                         Text(
-                            text = when(selectedTab) {
-                                "Songs" -> "Songs"
-                                "Playlists" -> "Playlists"
-                                "Play queue" -> "Play Queue"
-                                "Albums" -> "Albums"
-                                "Artists" -> "Artists"
-                                else -> "Vanilla"
-                            },
+                            text = "Musicly",
                             color = colors.textPrimary,
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 22.sp,
@@ -152,97 +140,8 @@ fun HomeView(
             )
         },
         bottomBar = {
-            // Sticky Bottom Mini Player
-            activeSong?.let { song ->
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(horizontal = 14.dp, vertical = 8.dp)
-                        .clip(RoundedCornerShape(32.dp))
-                        .background(colors.surface)
-                        .clickable { viewModel.navigateTo(ScreenState.NOW_PLAYING) }
-                        .testTag("mini_player_bar")
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Art Thumbnail
-                        Box(
-                            modifier = Modifier
-                                .size(46.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(safeParseColor(song.artworkColorHex)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            AsyncImage(
-                                model = getFeaturedImageSource(song),
-                                contentDescription = "Active song cover",
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop,
-                                error = androidx.compose.ui.graphics.painter.ColorPainter(Color.Transparent)
-                            )
-                            if (song.artworkUri.isNullOrBlank() && song.id.startsWith("external")) {
-                                Icon(Icons.Default.MusicNote, contentDescription = null, tint = Color.White.copy(alpha = 0.8f))
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.width(12.dp))
-
-                        // Text Details
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = song.title,
-                                color = colors.textPrimary,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = song.artist,
-                                color = colors.textSecondary,
-                                fontSize = 12.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-
-                        // Play/Pause button
-                        IconButton(
-                            onClick = { viewModel.togglePlayPause() },
-                            modifier = Modifier
-                                .size(44.dp)
-                                .background(colors.selectedBackground, RoundedCornerShape(22.dp))
-                                .testTag("mini_play_button")
-                        ) {
-                            Icon(
-                                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                contentDescription = "Play/Pause",
-                                tint = colors.accent,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(8.dp))
-
-                        // Next button
-                        IconButton(
-                            onClick = { viewModel.skipNext() },
-                            modifier = Modifier.testTag("mini_next_button")
-                        ) {
-                            Icon(
-                                Icons.Default.SkipNext,
-                                contentDescription = "Skip Next",
-                                tint = colors.textPrimary,
-                                modifier = Modifier.size(26.dp)
-                            )
-                        }
-                    }
-                }
+            if (activeSong != null) {
+                Spacer(modifier = Modifier.height(96.dp).navigationBarsPadding())
             }
         }
     ) { innerPadding ->
@@ -269,13 +168,12 @@ fun HomeView(
                             colors = colors,
                             sortDescending = sortDescending,
                             onToggleSort = { viewModel.toggleSortOrder() },
-                            onSongSelect = { viewModel.setSong(it) },
+                            onSongSelect = { viewModel.playSongFromList(it, filteredSongs) },
                             onMoreOptions = {
                                 songSelectedForPlaylist = it
                                 showSongActionsDialog = true
                             },
-                            onFavoriteToggle = { viewModel.toggleFavorite(it) },
-                            onDownloadClick = { showDownloadDialog = true }
+                            onFavoriteToggle = { viewModel.toggleFavorite(it) }
                         )
                     }
                     "Favorites" -> {
@@ -286,7 +184,7 @@ fun HomeView(
                             songs = favoriteSongs,
                             activeSong = activeSong,
                             colors = colors,
-                            onSongSelect = { viewModel.setSong(it) },
+                            onSongSelect = { viewModel.playSongFromList(it, favoriteSongs) },
                             onMoreOptions = {
                                 songSelectedForPlaylist = it
                                 showSongActionsDialog = true
@@ -301,7 +199,6 @@ fun HomeView(
                             onCreatePlaylistClick = { showCreatePlaylistDialog = true },
                             onPlaylistClick = { playlist ->
                                 viewModel.selectPlaylist(playlist)
-                                viewModel.navigateTo(ScreenState.NOW_PLAYING) // or view details
                             },
                             onPlaylistDelete = { viewModel.deletePlaylist(it.id) }
                         )
@@ -311,21 +208,21 @@ fun HomeView(
                             playQueue = playQueue,
                             activeSong = activeSong,
                             colors = colors,
-                            onSongSelect = { viewModel.setSong(it) }
+                            onSongSelect = { viewModel.playSongFromList(it, playQueue) }
                         )
                     }
                     "Albums" -> {
                         AlbumsTabContent(
                             songs = allSongs,
                             colors = colors,
-                            onSongSelect = { viewModel.setSong(it) }
+                            onSongSelect = { viewModel.playSongFromList(it, allSongs) }
                         )
                     }
                     "Artists" -> {
                         ArtistsTabContent(
                             songs = allSongs,
                             colors = colors,
-                            onSongSelect = { viewModel.setSong(it) }
+                            onSongSelect = { viewModel.playSongFromList(it, allSongs) }
                         )
                     }
                 }
@@ -349,7 +246,7 @@ fun HomeView(
                                 .fillMaxWidth()
                                 .clickable {
                                     songSelectedForPlaylist?.let { song ->
-                                        viewModel.addSongToPlaylist(playlist.id, song.id)
+                                        viewModel.addSongToPlaylist(playlist.id, song)
                                     }
                                     showPlaylistDialog = false
                                 }
@@ -525,144 +422,6 @@ fun HomeView(
             }
         )
     }
-
-    // Simulated cloud download online track dialog
-    if (showDownloadDialog) {
-        AlertDialog(
-            onDismissRequest = { if (!isDownloadingSimulated) showDownloadDialog = false },
-            title = { Text("Cloud Digital Downloads", color = colors.textPrimary, fontWeight = FontWeight.Bold) },
-            containerColor = colors.surface,
-            text = {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    if (isDownloadingSimulated) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        ) {
-                            Text("Downloading & caching...", color = colors.textPrimary, fontWeight = FontWeight.Medium)
-                            Spacer(modifier = Modifier.height(12.dp))
-                            CircularProgressIndicator(color = colors.accent)
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text("Fetching high-fidelity cover artwork & scrolling lyrics...", color = colors.textSecondary, fontSize = 11.sp, textAlign = TextAlign.Center)
-                        }
-                    } else {
-                        Text(
-                            text = "Download premium free high-fidelity songs offline. Album artwork & synchronized scrolling lyrics are automatically resolved!",
-                            color = colors.textSecondary,
-                            fontSize = 13.sp,
-                            lineHeight = 18.sp
-                        )
-                        
-                        Divider(color = colors.textSecondary.copy(alpha = 0.2f))
-                        
-                        Text("Curated Hot Online Releases", color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp, modifier = Modifier.align(Alignment.Start))
-                        
-                        val curators = listOf(
-                            Pair("Kesariya", "Arijit Singh"),
-                            Pair("Pasoori", "Ali Sethi & Shae Gill"),
-                            Pair("Senorita", "Shawn Mendes"),
-                            Pair("Shape of You", "Ed Sheeran"),
-                            Pair("Believer", "Imagine Dragons")
-                        )
-                        
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                            curators.forEach { (title, artist) ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(colors.surface)
-                                        .clickable {
-                                            isDownloadingSimulated = true
-                                            // Launch fake download delay to show animation
-                                            coroutineScope.launch {
-                                                kotlinx.coroutines.delay(2000)
-                                                viewModel.downloadCustomSong(title, artist)
-                                                isDownloadingSimulated = false
-                                                showDownloadDialog = false
-                                            }
-                                        }
-                                        .padding(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Column {
-                                        Text(title, color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                        Text(artist, color = colors.textSecondary, fontSize = 11.sp)
-                                    }
-                                    Icon(Icons.Default.CloudDownload, contentDescription = null, tint = colors.accent, modifier = Modifier.size(18.dp))
-                                }
-                            }
-                        }
-                        
-                        Divider(color = colors.textSecondary.copy(alpha = 0.2f))
-                        
-                        Text("Download Custom Song", color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp, modifier = Modifier.align(Alignment.Start))
-                        
-                        OutlinedTextField(
-                            value = downloadCustomTitle,
-                            onValueChange = { downloadCustomTitle = it },
-                            label = { Text("Track Title") },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = colors.textPrimary,
-                                unfocusedTextColor = colors.textPrimary,
-                                focusedBorderColor = colors.accent,
-                                unfocusedBorderColor = colors.textSecondary
-                            ),
-                            singleLine = true
-                        )
-
-                        OutlinedTextField(
-                            value = downloadCustomArtist,
-                            onValueChange = { downloadCustomArtist = it },
-                            label = { Text("Artist Name") },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = colors.textPrimary,
-                                unfocusedTextColor = colors.textPrimary,
-                                focusedBorderColor = colors.accent,
-                                unfocusedBorderColor = colors.textSecondary
-                            ),
-                            singleLine = true
-                        )
-
-                        Button(
-                            onClick = {
-                                if (downloadCustomTitle.isNotBlank() && downloadCustomArtist.isNotBlank()) {
-                                    isDownloadingSimulated = true
-                                    coroutineScope.launch {
-                                        kotlinx.coroutines.delay(2000)
-                                        viewModel.downloadCustomSong(downloadCustomTitle, downloadCustomArtist)
-                                        downloadCustomTitle = ""
-                                        downloadCustomArtist = ""
-                                        isDownloadingSimulated = false
-                                        showDownloadDialog = false
-                                    }
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = colors.accent),
-                            modifier = Modifier.fillMaxWidth(),
-                            enabled = downloadCustomTitle.isNotBlank() && downloadCustomArtist.isNotBlank()
-                        ) {
-                            Text("Download Custom Track", color = Color.White)
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                if (!isDownloadingSimulated) {
-                    TextButton(onClick = { showDownloadDialog = false }) {
-                        Text("Cancel", color = colors.accent)
-                    }
-                }
-            }
-        )
-    }
 }
 
 @Composable
@@ -709,8 +468,7 @@ fun SongsTabContent(
     onToggleSort: () -> Unit,
     onSongSelect: (Song) -> Unit,
     onMoreOptions: (Song) -> Unit,
-    onFavoriteToggle: (Song) -> Unit,
-    onDownloadClick: () -> Unit
+    onFavoriteToggle: (Song) -> Unit
 ) {
     val coroutineScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
@@ -751,14 +509,6 @@ fun SongsTabContent(
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { onDownloadClick() }) {
-                    Icon(
-                        imageVector = Icons.Default.CloudDownload,
-                        contentDescription = "Download Music",
-                        tint = colors.accent,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
                 IconButton(onClick = { onToggleSort() }) {
                     Icon(
                         imageVector = Icons.Default.SortByAlpha,
@@ -825,14 +575,6 @@ fun SongsTabContent(
                                     contentScale = ContentScale.Crop,
                                     error = androidx.compose.ui.graphics.painter.ColorPainter(Color.Transparent)
                                 )
-                                if (song.artworkUri.isNullOrBlank() && song.id.startsWith("external")) {
-                                    Text(
-                                        text = song.title.take(1).uppercase(),
-                                        color = Color.White.copy(alpha = 0.8f),
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 18.sp
-                                    )
-                                }
                             }
 
                             Spacer(modifier = Modifier.width(16.dp))
@@ -857,22 +599,30 @@ fun SongsTabContent(
                             }
 
                             // Right actions (Favorites icon + dropdown overflow menu)
-                            IconButton(onClick = { onFavoriteToggle(song) }) {
-                                Icon(
-                                    imageVector = if (song.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                    contentDescription = "Favorite",
-                                    tint = if (song.isFavorite) Color.Red else colors.textSecondary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.End) {
+                                IconButton(
+                                    onClick = { onFavoriteToggle(song) },
+                                    modifier = Modifier.size(32.dp).padding(0.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (song.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                        contentDescription = "Favorite",
+                                        tint = if (song.isFavorite) Color.Red else colors.textSecondary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
 
-                            IconButton(onClick = { onMoreOptions(song) }) {
-                                Icon(
-                                    imageVector = Icons.Default.MoreVert,
-                                    contentDescription = "More",
-                                    tint = colors.textSecondary,
-                                    modifier = Modifier.size(20.dp)
-                                )
+                                IconButton(
+                                    onClick = { onMoreOptions(song) },
+                                    modifier = Modifier.size(32.dp).padding(0.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.MoreVert,
+                                        contentDescription = "More",
+                                        tint = colors.textSecondary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -885,24 +635,47 @@ fun SongsTabContent(
                 exit = fadeOut() + slideOutVertically(targetOffsetY = { it }),
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(bottom = 24.dp, end = 24.dp)
+                    .padding(bottom = if (activeSong != null) 96.dp else 24.dp, end = 24.dp)
             ) {
-                FloatingActionButton(
-                    onClick = {
-                        coroutineScope.launch {
-                            listState.animateScrollToItem(0)
-                        }
-                    },
-                    containerColor = colors.selectedBackground,
-                    contentColor = colors.accent,
-                    shape = androidx.compose.foundation.shape.CircleShape,
-                    modifier = Modifier.size(48.dp).testTag("scroll_top_songs")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.ArrowUpward,
-                        contentDescription = "Back to Top",
-                        modifier = Modifier.size(24.dp)
-                    )
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    FloatingActionButton(
+                        onClick = {
+                            coroutineScope.launch {
+                                val activeIndex = songs.indexOfFirst { it.id == activeSong?.id }
+                                if (activeIndex != -1) {
+                                    listState.animateScrollToItem(activeIndex)
+                                }
+                            }
+                        },
+                        containerColor = colors.selectedBackground,
+                        contentColor = colors.accent,
+                        shape = androidx.compose.foundation.shape.CircleShape,
+                        modifier = Modifier.size(48.dp).testTag("scroll_target_songs")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.GpsFixed,
+                            contentDescription = "Scroll to Playing Song",
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+
+                    FloatingActionButton(
+                        onClick = {
+                            coroutineScope.launch {
+                                listState.animateScrollToItem(0)
+                            }
+                        },
+                        containerColor = colors.selectedBackground,
+                        contentColor = colors.accent,
+                        shape = androidx.compose.foundation.shape.CircleShape,
+                        modifier = Modifier.size(48.dp).testTag("scroll_top_songs")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ArrowUpward,
+                            contentDescription = "Back to Top",
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
                 }
             }
         }
@@ -1040,14 +813,6 @@ fun FavoritesTabContent(
                                         contentScale = ContentScale.Crop,
                                         error = androidx.compose.ui.graphics.painter.ColorPainter(Color.Transparent)
                                     )
-                                    if (song.artworkUri.isNullOrBlank() && song.id.startsWith("external")) {
-                                        Text(
-                                            text = song.title.take(1).uppercase(),
-                                            color = Color.White.copy(alpha = 0.8f),
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 18.sp
-                                        )
-                                    }
                                 }
 
                                 Spacer(modifier = Modifier.width(16.dp))
@@ -1100,24 +865,47 @@ fun FavoritesTabContent(
                     exit = fadeOut() + slideOutVertically(targetOffsetY = { it }),
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .padding(bottom = 24.dp, end = 24.dp)
+                        .padding(bottom = if (activeSong != null) 96.dp else 24.dp, end = 24.dp)
                 ) {
-                    FloatingActionButton(
-                        onClick = {
-                            coroutineScope.launch {
-                                listState.animateScrollToItem(0)
-                            }
-                        },
-                        containerColor = colors.selectedBackground,
-                        contentColor = colors.accent,
-                        shape = androidx.compose.foundation.shape.CircleShape,
-                        modifier = Modifier.size(48.dp).testTag("scroll_top_favorites")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ArrowUpward,
-                            contentDescription = "Back to Top",
-                            modifier = Modifier.size(24.dp)
-                        )
+                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        FloatingActionButton(
+                            onClick = {
+                                coroutineScope.launch {
+                                    val activeIndex = songs.indexOfFirst { it.id == activeSong?.id }
+                                    if (activeIndex != -1) {
+                                        listState.animateScrollToItem(activeIndex)
+                                    }
+                                }
+                            },
+                            containerColor = colors.selectedBackground,
+                            contentColor = colors.accent,
+                            shape = androidx.compose.foundation.shape.CircleShape,
+                            modifier = Modifier.size(48.dp).testTag("scroll_target_favorites")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.GpsFixed,
+                                contentDescription = "Scroll to Playing Song",
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+
+                        FloatingActionButton(
+                            onClick = {
+                                coroutineScope.launch {
+                                    listState.animateScrollToItem(0)
+                                }
+                            },
+                            containerColor = colors.selectedBackground,
+                            contentColor = colors.accent,
+                            shape = androidx.compose.foundation.shape.CircleShape,
+                            modifier = Modifier.size(48.dp).testTag("scroll_top_favorites")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ArrowUpward,
+                                contentDescription = "Back to Top",
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -1285,9 +1073,6 @@ fun PlayQueueTabContent(
                             contentScale = ContentScale.Crop,
                             error = androidx.compose.ui.graphics.painter.ColorPainter(Color.Transparent)
                         )
-                        if (song.artworkUri.isNullOrBlank() && song.id.startsWith("external")) {
-                            Icon(Icons.Default.MusicNote, contentDescription = null, tint = Color.White.copy(alpha = 0.8f))
-                        }
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
@@ -1438,7 +1223,11 @@ data class ColorPalette(
 
 fun getFeaturedImageSource(song: Song): Any {
     return if (!song.artworkUri.isNullOrBlank()) {
-        song.artworkUri
+        if (song.artworkUri.startsWith("/")) {
+            java.io.File(song.artworkUri)
+        } else {
+            song.artworkUri
+        }
     } else {
         when (song.id) {
             "song_tauba" -> "https://images.unsplash.com/photo-1448375240586-882707db888b?q=80&w=400"

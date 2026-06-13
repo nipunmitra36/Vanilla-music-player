@@ -190,23 +190,6 @@ fun NowPlayingView(
                         contentScale = ContentScale.Crop,
                         error = androidx.compose.ui.graphics.painter.ColorPainter(Color.Transparent)
                     )
-                    // Custom aesthetic vector overlay fallback when empty MediaStore art
-                    if (song.artworkUri.isNullOrBlank() && song.id.startsWith("external")) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize(0.6f)
-                                .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.08f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.MusicNote,
-                                contentDescription = null,
-                                tint = Color.White.copy(alpha = 0.6f),
-                                modifier = Modifier.size(80.dp)
-                            )
-                        }
-                    }
                 }
 
                 Spacer(modifier = Modifier.weight(0.6f))
