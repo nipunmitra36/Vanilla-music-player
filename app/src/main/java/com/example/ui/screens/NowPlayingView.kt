@@ -43,6 +43,10 @@ fun NowPlayingView(
     val trackDurationSeconds by viewModel.trackDurationSeconds.collectAsState()
     val isLyricsExpanded by viewModel.isLyricsExpanded.collectAsState()
     val repeatMode by viewModel.repeatMode.collectAsState()
+    val shuffleEnabled by viewModel.shuffleEnabled.collectAsState()
+    val sleepTimeRemaining by viewModel.sleepTimeRemaining.collectAsState()
+    val playbackSpeed by viewModel.playbackSpeed.collectAsState()
+    var showMoreOptionsDialog by remember { mutableStateOf(false) }
 
     if (activeSong == null) {
         Box(
@@ -141,19 +145,6 @@ fun NowPlayingView(
                 )
 
                 Row {
-                    // Equalizer shortcut
-                    IconButton(
-                        onClick = { viewModel.navigateTo(ScreenState.EQUALIZER) },
-                        modifier = Modifier.testTag("eq_shortcut_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Tune,
-                            contentDescription = "Equalizer Settings",
-                            tint = colors.textPrimary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-
                     // Lyrics visibility toggle
                     IconButton(
                         onClick = { viewModel.toggleLyricsExpanded() },
@@ -163,6 +154,19 @@ fun NowPlayingView(
                             imageVector = Icons.Default.Lyrics,
                             contentDescription = "Lyrics Display",
                             tint = if (isLyricsExpanded) colors.accent else colors.textPrimary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+
+                    // More play settings (3-dot options menu)
+                    IconButton(
+                        onClick = { showMoreOptionsDialog = true },
+                        modifier = Modifier.testTag("more_options_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = "Playback Options",
+                            tint = colors.textPrimary,
                             modifier = Modifier.size(24.dp)
                         )
                     }
@@ -192,7 +196,7 @@ fun NowPlayingView(
                     )
                 }
 
-                Spacer(modifier = Modifier.weight(0.6f))
+                Spacer(modifier = Modifier.height(36.dp))
 
                 // Song Title & Artists descriptors
                 Column(
@@ -259,7 +263,7 @@ fun NowPlayingView(
                     )
                 }
 
-                Spacer(modifier = Modifier.weight(0.5f))
+                Spacer(modifier = Modifier.weight(0.4f))
 
                 // Media Playback Transport Controllers Row
                 Row(
@@ -351,34 +355,6 @@ fun NowPlayingView(
                 }
 
                 Spacer(modifier = Modifier.weight(0.4f))
-
-                // Short mini lyrics preview clicker
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(colors.surface)
-                        .clickable { viewModel.toggleLyricsExpanded() }
-                        .padding(vertical = 12.dp, horizontal = 16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = if (lyricLines.isNotEmpty()) lyricLines[activeLineIndex] else "No lyrics found",
-                            color = colors.textPrimary,
-                            fontSize = 14.sp,
-                            maxLines = 1,
-                            textAlign = TextAlign.Center
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Tap to show full lyrics",
-                            color = colors.accent,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
             } else {
                 // Expanded High-Fidelity Lyrics Panel
                 Spacer(modifier = Modifier.height(16.dp))
@@ -484,4 +460,292 @@ fun NowPlayingView(
             }
         }
     }
+
+    if (showMoreOptionsDialog) {
+        MorePlaybackOptionsDialog(
+            song = song,
+            playbackSpeed = playbackSpeed,
+            sleepTimeRemaining = sleepTimeRemaining,
+            repeatMode = repeatMode,
+            shuffleEnabled = shuffleEnabled,
+            colors = colors,
+            onSpeedChange = { viewModel.setPlaybackSpeed(it) },
+            onSleepTimerChange = { viewModel.setSleepTimer(it) },
+            onRepeatToggle = { viewModel.toggleRepeatMode() },
+            onShuffleToggle = { viewModel.toggleShuffle() },
+            onAudioEffectsClick = {
+                showMoreOptionsDialog = false
+                viewModel.navigateTo(ScreenState.EQUALIZER)
+            },
+            onDismissRequest = { showMoreOptionsDialog = false }
+        )
+    }
+}
+
+@Composable
+fun MorePlaybackOptionsDialog(
+    song: Song,
+    playbackSpeed: Float,
+    sleepTimeRemaining: Int?,
+    repeatMode: com.example.ui.RepeatMode,
+    shuffleEnabled: Boolean,
+    colors: ColorPalette,
+    onSpeedChange: (Float) -> Unit,
+    onSleepTimerChange: (Int?) -> Unit,
+    onRepeatToggle: () -> Unit,
+    onShuffleToggle: () -> Unit,
+    onAudioEffectsClick: () -> Unit,
+    onDismissRequest: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismissRequest,
+        confirmButton = {
+            TextButton(
+                onClick = onDismissRequest,
+                modifier = Modifier.testTag("dialog_close_button")
+            ) {
+                Text("Close", color = colors.accent, fontWeight = FontWeight.Bold)
+            }
+        },
+        title = {
+            Text(
+                "Playback Settings",
+                color = colors.textPrimary,
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp
+            )
+        },
+        containerColor = colors.surface,
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp)
+            .testTag("playback_settings_dialog"),
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+            ) {
+                // Section 2: Shuffle & Repeat toggles
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Shuffle card block
+                    Card(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { onShuffleToggle() }
+                            .testTag("dialog_shuffle_block"),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (shuffleEnabled) colors.selectedBackground else colors.background
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Shuffle,
+                                contentDescription = "Shuffle mode",
+                                tint = if (shuffleEnabled) colors.accent else colors.textSecondary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "Shuffle",
+                                color = colors.textPrimary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                if (shuffleEnabled) "On" else "Off",
+                                color = if (shuffleEnabled) colors.accent else colors.textSecondary,
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+
+                    // Repeat card block
+                    Card(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { onRepeatToggle() }
+                            .testTag("dialog_repeat_block"),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (repeatMode != com.example.ui.RepeatMode.NONE) colors.selectedBackground else colors.background
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(
+                                imageVector = when (repeatMode) {
+                                    com.example.ui.RepeatMode.ONE -> Icons.Default.RepeatOne
+                                    else -> Icons.Default.Repeat
+                                },
+                                contentDescription = "Repeat mode",
+                                tint = if (repeatMode != com.example.ui.RepeatMode.NONE) colors.accent else colors.textSecondary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "Repeat",
+                                color = colors.textPrimary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                when (repeatMode) {
+                                    com.example.ui.RepeatMode.ALL -> "All"
+                                    com.example.ui.RepeatMode.ONE -> "One"
+                                    else -> "Off"
+                                },
+                                color = if (repeatMode != com.example.ui.RepeatMode.NONE) colors.accent else colors.textSecondary,
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+                }
+
+                // Section 3: Playback speed chips selector
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Speed, contentDescription = null, tint = colors.textSecondary, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Speed Selector", color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f).forEach { speed ->
+                            val isSpeedSelected = (playbackSpeed == speed)
+                            val text = if (speed == 1.0f) "1.0x" else "${speed}x"
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSpeedSelected) colors.selectedBackground else colors.background)
+                                    .clickable { onSpeedChange(speed) }
+                                    .padding(vertical = 8.dp)
+                                    .testTag("dialog_speed_chip_$text"),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = text,
+                                    color = if (isSpeedSelected) colors.accent else colors.textPrimary,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSpeedSelected) FontWeight.Bold else FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Section 4: Sleep Timer Customizer
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.HourglassEmpty, contentDescription = null, tint = colors.textSecondary, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (sleepTimeRemaining != null) {
+                                val m = sleepTimeRemaining / 60
+                                val s = sleepTimeRemaining % 60
+                                "Sleep Timer: Stop in ${String.format("%02d:%02d", m, s)}"
+                            } else {
+                                "Sleep Timer"
+                            },
+                            color = if (sleepTimeRemaining != null) colors.accent else colors.textPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        listOf(null, 5, 15, 30, 60).forEach { mins ->
+                            val text = if (mins == null) "Off" else "${mins}m"
+                            val isSelected = if (mins == null) sleepTimeRemaining == null else {
+                                val currentMin = sleepTimeRemaining?.div(60)
+                                currentMin == mins
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSelected) colors.selectedBackground else colors.background)
+                                    .clickable { onSleepTimerChange(mins) }
+                                    .padding(vertical = 8.dp)
+                                    .testTag("dialog_timer_chip_$text"),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = text,
+                                    color = if (isSelected) colors.accent else colors.textPrimary,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Section 5: Audio Effects Button Card
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onAudioEffectsClick() }
+                        .testTag("dialog_eq_block"),
+                    colors = CardDefaults.cardColors(containerColor = colors.background),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.GraphicEq,
+                                contentDescription = "Audio effects",
+                                tint = colors.accent,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    "Audio Effects (Equalizer)",
+                                    color = colors.textPrimary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                                Text(
+                                    "Fine-tune sound frequencies and presets",
+                                    color = colors.textSecondary,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                        Icon(
+                            imageVector = Icons.Default.ArrowForward,
+                            contentDescription = null,
+                            tint = colors.textSecondary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+        }
+    )
 }

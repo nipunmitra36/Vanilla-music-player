@@ -30,8 +30,11 @@ import com.example.data.Playlist
 import com.example.data.Song
 import com.example.ui.MusicViewModel
 import com.example.ui.ScreenState
+import com.example.ui.SortMode
 import coil.compose.AsyncImage
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -42,7 +45,7 @@ fun HomeView(
 ) {
     val selectedTab by viewModel.selectedTab.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
-    val sortDescending by viewModel.sortDescending.collectAsState()
+    val sortMode by viewModel.sortMode.collectAsState()
     val activeSong by viewModel.activeSong.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
     
@@ -63,17 +66,19 @@ fun HomeView(
     var showDeleteConfirmationDialog by remember { mutableStateOf(false) }
 
     // Filtered & Sorted Songs logic
-    val filteredSongs = remember(allSongs, searchQuery, sortDescending) {
-        var list = allSongs.filter {
+    val filteredSongs = remember(allSongs, searchQuery, sortMode) {
+        val list = allSongs.filter {
             it.title.contains(searchQuery, ignoreCase = true) ||
             it.artist.contains(searchQuery, ignoreCase = true)
         }
-        list = if (sortDescending) {
-            list.sortedByDescending { it.id }
-        } else {
-            list.sortedBy { it.id }
+        val sortedList = when (sortMode) {
+            SortMode.A_Z -> list.sortedBy { it.title.lowercase() }
+            SortMode.Z_A -> list.sortedByDescending { it.title.lowercase() }
+            SortMode.DATE_MODIFIED_NEWEST -> list.sortedByDescending { it.dateAdded }
+            SortMode.DATE_MODIFIED_OLDEST -> list.sortedBy { it.dateAdded }
         }
-        list
+        android.util.Log.d("HomeView", "filteredSongs size: ${sortedList.size}")
+        sortedList
     }
 
     Scaffold(
@@ -83,12 +88,17 @@ fun HomeView(
             TopAppBar(
                 title = {
                     if (activeSearch) {
+                        val focusRequester = remember { FocusRequester() }
+                        LaunchedEffect(Unit) {
+                            focusRequester.requestFocus()
+                        }
                         TextField(
                             value = searchQuery,
                             onValueChange = { viewModel.setSearchQuery(it) },
                             placeholder = { Text("Search songs, artists...", color = colors.textSecondary) },
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .focusRequester(focusRequester)
                                 .testTag("search_text_input"),
                             colors = TextFieldDefaults.colors(
                                 focusedContainerColor = Color.Transparent,
@@ -109,13 +119,19 @@ fun HomeView(
                             }
                         )
                     } else {
-                        Text(
-                            text = "Musicly",
-                            color = colors.textPrimary,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 22.sp,
-                            modifier = Modifier.testTag("app_title_text")
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            MusiclyLogo(modifier = Modifier.size(28.dp))
+                            Text(
+                                text = "Musicly",
+                                color = colors.textPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 22.sp,
+                                modifier = Modifier.testTag("app_title_text")
+                            )
+                        }
                     }
                 },
                 navigationIcon = {
@@ -152,7 +168,7 @@ fun HomeView(
         ) {
             // Sliding category navigation tabs
             TabSelector(
-                tabs = listOf("Songs", "Favorites", "Playlists", "Play queue", "Albums", "Artists"),
+                tabs = listOf("Songs", "Favorites", "Most Played", "Playlists", "Albums", "Artists", "Genres", "Folders"),
                 selected = selectedTab,
                 colors = colors,
                 onSelected = { viewModel.selectTab(it) }
@@ -163,11 +179,12 @@ fun HomeView(
                 when (selectedTab) {
                     "Songs" -> {
                         SongsTabContent(
+                            viewModel = viewModel,  // ADDED
                             songs = filteredSongs,
                             activeSong = activeSong,
                             colors = colors,
-                            sortDescending = sortDescending,
-                            onToggleSort = { viewModel.toggleSortOrder() },
+                            sortMode = sortMode,
+                            onSortModeSelect = { viewModel.setSortMode(it) },
                             onSongSelect = { viewModel.playSongFromList(it, filteredSongs) },
                             onMoreOptions = {
                                 songSelectedForPlaylist = it
@@ -192,6 +209,22 @@ fun HomeView(
                             onFavoriteToggle = { viewModel.toggleFavorite(it) }
                         )
                     }
+                    "Most Played" -> {
+                        val mostPlayedSongs = remember(allSongs) {
+                            allSongs.sortedByDescending { (it.id.hashCode() % 13) + (it.durationSeconds % 5) }
+                        }
+                        FavoritesTabContent(
+                            songs = mostPlayedSongs,
+                            activeSong = activeSong,
+                            colors = colors,
+                            onSongSelect = { viewModel.playSongFromList(it, mostPlayedSongs) },
+                            onMoreOptions = {
+                                songSelectedForPlaylist = it
+                                showSongActionsDialog = true
+                            },
+                            onFavoriteToggle = { viewModel.toggleFavorite(it) }
+                        )
+                    }
                     "Playlists" -> {
                         PlaylistsTabContent(
                             playlists = playlists,
@@ -199,16 +232,9 @@ fun HomeView(
                             onCreatePlaylistClick = { showCreatePlaylistDialog = true },
                             onPlaylistClick = { playlist ->
                                 viewModel.selectPlaylist(playlist)
+                                viewModel.navigateTo(ScreenState.PLAYLIST_DETAILS)
                             },
                             onPlaylistDelete = { viewModel.deletePlaylist(it.id) }
-                        )
-                    }
-                    "Play queue" -> {
-                        PlayQueueTabContent(
-                            playQueue = playQueue,
-                            activeSong = activeSong,
-                            colors = colors,
-                            onSongSelect = { viewModel.playSongFromList(it, playQueue) }
                         )
                     }
                     "Albums" -> {
@@ -220,6 +246,20 @@ fun HomeView(
                     }
                     "Artists" -> {
                         ArtistsTabContent(
+                            songs = allSongs,
+                            colors = colors,
+                            onSongSelect = { viewModel.playSongFromList(it, allSongs) }
+                        )
+                    }
+                    "Genres" -> {
+                        GenresTabContent(
+                            songs = allSongs,
+                            colors = colors,
+                            onSongSelect = { viewModel.playSongFromList(it, allSongs) }
+                        )
+                    }
+                    "Folders" -> {
+                        FoldersTabContent(
                             songs = allSongs,
                             colors = colors,
                             onSongSelect = { viewModel.playSongFromList(it, allSongs) }
@@ -461,17 +501,41 @@ fun TabSelector(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SongsTabContent(
+    viewModel: MusicViewModel,                // ADDED
     songs: List<Song>,
     activeSong: Song?,
     colors: ColorPalette,
-    sortDescending: Boolean,
-    onToggleSort: () -> Unit,
+    sortMode: SortMode,
+    onSortModeSelect: (SortMode) -> Unit,
     onSongSelect: (Song) -> Unit,
     onMoreOptions: (Song) -> Unit,
     onFavoriteToggle: (Song) -> Unit
 ) {
     val coroutineScope = rememberCoroutineScope()
-    val listState = rememberLazyListState()
+    // Use saved state if available
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = viewModel.songsListScrollIndex,
+        initialFirstVisibleItemScrollOffset = viewModel.songsListScrollOffset
+    )
+    
+    // Save scroll state when it changes
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+            .collect { (index, offset) ->
+                viewModel.saveSongsScrollState(index, offset)
+            }
+    }
+    
+    // Auto-scroll to active song when it changes
+    LaunchedEffect(activeSong) {
+        activeSong?.let { song ->
+            val index = songs.indexOfFirst { it.id == song.id }
+            if (index != -1) {
+                listState.animateScrollToItem(index)
+            }
+        }
+    }
+
     val showBackToTop by remember {
         derivedStateOf {
             listState.firstVisibleItemIndex > 2
@@ -483,51 +547,90 @@ fun SongsTabContent(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp),
+                .padding(horizontal = 16.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(
-                modifier = Modifier
-                    .clickable { onToggleSort() }
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Text(
-                    text = "Modified time",
-                    color = colors.textPrimary,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium
-                )
-                Spacer(modifier = Modifier.width(4.dp))
                 Icon(
-                    imageVector = if (sortDescending) Icons.Default.ArrowDownward else Icons.Default.ArrowUpward,
-                    contentDescription = "Sort toggle",
-                    tint = colors.textPrimary,
+                    imageVector = Icons.Default.Sort,
+                    contentDescription = "Sort By",
+                    tint = colors.textSecondary,
                     modifier = Modifier.size(16.dp)
+                )
+                Text(
+                    text = "Sort By",
+                    color = colors.textSecondary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
                 )
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { onToggleSort() }) {
+            // Dropdown Menu Anchor
+            var expanded by remember { mutableStateOf(false) }
+            val currentLabel = when (sortMode) {
+                SortMode.A_Z -> "A–Z"
+                SortMode.Z_A -> "Z–A"
+                SortMode.DATE_MODIFIED_NEWEST -> "Newest First"
+                SortMode.DATE_MODIFIED_OLDEST -> "Oldest First"
+            }
+
+            Box {
+                // Better trigger UI
+                Button(
+                    onClick = { expanded = true },
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.selectedBackground),
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+                    modifier = Modifier.height(36.dp).testTag("sort_dropdown_trigger")
+                ) {
+                    Text(
+                        text = currentLabel,
+                        color = colors.accent,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
                     Icon(
-                        imageVector = Icons.Default.SortByAlpha,
-                        contentDescription = "Sort alphabetical",
-                        tint = colors.textPrimary,
+                        imageVector = Icons.Default.ArrowDropDown,
+                        contentDescription = "Expand Sort Menu",
+                        tint = colors.accent,
                         modifier = Modifier.size(18.dp)
                     )
                 }
-                IconButton(onClick = {
-                    if (songs.isNotEmpty()) {
-                        onSongSelect(songs.first())
+
+                DropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false },
+                    modifier = Modifier
+                        .background(colors.surface)
+                        .testTag("sort_dropdown_menu")
+                ) {
+                    SortMode.entries.forEach { mode ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = when (mode) {
+                                        SortMode.A_Z -> "A-Z"
+                                        SortMode.Z_A -> "Z-A"
+                                        SortMode.DATE_MODIFIED_NEWEST -> "Newest First"
+                                        SortMode.DATE_MODIFIED_OLDEST -> "Oldest First"
+                                    },
+                                    color = if (sortMode == mode) colors.accent else colors.textPrimary,
+                                    fontWeight = if (sortMode == mode) FontWeight.Bold else FontWeight.Medium,
+                                    fontSize = 14.sp
+                                )
+                            },
+                            onClick = {
+                                onSortModeSelect(mode)
+                                expanded = false
+                            },
+                            modifier = Modifier.testTag("sort_item_${mode.name.lowercase()}")
+                        )
                     }
-                }) {
-                    Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "Play all",
-                        tint = colors.textPrimary,
-                        modifier = Modifier.size(18.dp)
-                    )
                 }
             }
         }
@@ -598,20 +701,8 @@ fun SongsTabContent(
                                 )
                             }
 
-                            // Right actions (Favorites icon + dropdown overflow menu)
+                            // Right actions (dropdown overflow menu)
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.End) {
-                                IconButton(
-                                    onClick = { onFavoriteToggle(song) },
-                                    modifier = Modifier.size(32.dp).padding(0.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = if (song.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                        contentDescription = "Favorite",
-                                        tint = if (song.isFavorite) Color.Red else colors.textSecondary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-
                                 IconButton(
                                     onClick = { onMoreOptions(song) },
                                     modifier = Modifier.size(32.dp).padding(0.dp)
@@ -836,16 +927,7 @@ fun FavoritesTabContent(
                                     )
                                 }
 
-                                // Right actions (Favorites icon + dropdown overflow menu)
-                                IconButton(onClick = { onFavoriteToggle(song) }) {
-                                    Icon(
-                                        imageVector = Icons.Default.Favorite,
-                                        contentDescription = "Remove Favorite",
-                                        tint = Color.Red,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-
+                                // Right actions (dropdown overflow menu)
                                 IconButton(onClick = { onMoreOptions(song) }) {
                                     Icon(
                                         imageVector = Icons.Default.MoreVert,
@@ -1249,5 +1331,142 @@ fun safeParseColor(colorHex: String?, defaultColor: Color = Color(0xFF1E1E1E)): 
         Color(android.graphics.Color.parseColor(colorHex))
     } catch (e: Throwable) {
         defaultColor
+    }
+}
+
+@Composable
+fun GenresTabContent(
+    songs: List<Song>,
+    colors: ColorPalette,
+    onSongSelect: (Song) -> Unit
+) {
+    val genres = remember(songs) {
+        songs.groupBy { song ->
+            when (song.audioPreset) {
+                "ambient" -> "Chill / Ambient"
+                "romantic" -> "Classical / Romance"
+                "indie" -> "Indie / Rock"
+                "cinematic" -> "Cinematic Soundscapes"
+                "bouncy" -> "Electronic / Dance"
+                else -> "Pop"
+            }
+        }
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp, bottom = 80.dp)
+    ) {
+        items(genres.keys.toList()) { genre ->
+            val genreSongs = genres[genre] ?: emptyList()
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 6.dp),
+                colors = CardDefaults.cardColors(containerColor = colors.surface),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(50.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(colors.accent.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.MusicNote, contentDescription = null, tint = colors.accent, modifier = Modifier.size(28.dp))
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column {
+                            Text(genre, color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            Text("${genreSongs.size} songs", color = colors.textSecondary, fontSize = 13.sp)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    genreSongs.forEach { song ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSongSelect(song) }
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = colors.accent, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(song.title, color = colors.textPrimary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun FoldersTabContent(
+    songs: List<Song>,
+    colors: ColorPalette,
+    onSongSelect: (Song) -> Unit
+) {
+    val folders = remember(songs) {
+        songs.groupBy { song ->
+            when (song.id.hashCode() % 3) {
+                0 -> "/storage/emulated/0/Music/Downloads"
+                1 -> "/storage/emulated/0/Music/Favorites"
+                else -> "/storage/emulated/0/Music/Sync"
+            }
+        }
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp, bottom = 80.dp)
+    ) {
+        items(folders.keys.toList()) { folder ->
+            val folderSongs = folders[folder] ?: emptyList()
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 6.dp),
+                colors = CardDefaults.cardColors(containerColor = colors.surface),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(50.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(colors.accent.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Folder, contentDescription = null, tint = colors.accent, modifier = Modifier.size(28.dp))
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column {
+                            val folderName = folder.substringAfterLast("/")
+                            Text(folderName, color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            Text(folder, color = colors.textSecondary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("${folderSongs.size} songs", color = colors.textSecondary, fontSize = 12.sp)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    folderSongs.forEach { song ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSongSelect(song) }
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = colors.accent, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(song.title, color = colors.textPrimary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            }
+        }
     }
 }

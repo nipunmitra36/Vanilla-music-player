@@ -92,55 +92,17 @@ fun SettingsView(
                     onClick = { viewModel.navigateTo(ScreenState.EQUALIZER) }
                 )
             }
-
-            // 2. Media Store
+            
+            // 7. Scan Songs
             item {
-                if (isScanning) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(colors.surface)
-                            .padding(16.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(24.dp),
-                                color = colors.accent,
-                                strokeWidth = 2.dp
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                "Scanning Media Store...",
-                                color = colors.textPrimary,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        LinearProgressIndicator(
-                            progress = scannedFilesCount / 12f,
-                            modifier = Modifier.fillMaxWidth(),
-                            color = colors.accent,
-                            trackColor = colors.background
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            "Scanned $scannedFilesCount of 12 cache chunks.",
-                            color = colors.textSecondary,
-                            fontSize = 11.sp
-                        )
-                    }
-                } else {
-                    SettingsItem(
-                        title = "Media Store",
-                        subtitle = if (scannedFilesCount > 0) "Scan completed! Added 8 tracks" else "Scan for music",
-                        icon = Icons.Default.Folder,
-                        iconTint = Color(0xFFC78B45), // brownish/yellowish circle as in screenshot 3
-                        colors = colors,
-                        onClick = { viewModel.scanMedia() }
-                    )
-                }
+                SettingsItem(
+                    title = "Scan Songs",
+                    subtitle = if (isScanning) "Scanning... (${scannedFilesCount} files)" else "Rescan local media files",
+                    icon = Icons.Default.Refresh,
+                    iconTint = Color(0xFFE67E22), 
+                    colors = colors,
+                    onClick = { viewModel.scanMedia() }
+                )
             }
 
             // 3. Theme & UI
@@ -276,7 +238,7 @@ fun SettingsView(
     if (showAboutDialog) {
         AlertDialog(
             onDismissRequest = { showAboutDialog = false },
-            icon = { Icon(Icons.Default.MusicNote, contentDescription = null, tint = colors.accent, modifier = Modifier.size(40.dp)) },
+            icon = { MusiclyLogo(modifier = Modifier.size(56.dp)) },
             title = { Text("Musicly", color = colors.textPrimary, fontWeight = FontWeight.Bold) },
             containerColor = colors.surface,
             text = {

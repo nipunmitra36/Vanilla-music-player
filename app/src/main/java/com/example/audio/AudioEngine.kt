@@ -37,6 +37,28 @@ class AudioEngine private constructor(private val context: android.content.Conte
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying = _isPlaying.asStateFlow()
 
+    private val _playbackSpeed = MutableStateFlow(1.0f)
+    val playbackSpeed = _playbackSpeed.asStateFlow()
+
+    fun setPlaybackSpeed(speed: Float) {
+        _playbackSpeed.value = speed
+        applyPlaybackSpeed()
+    }
+
+    private fun applyPlaybackSpeed() {
+        val mp = mediaPlayer ?: return
+        val speed = _playbackSpeed.value
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                val params = mp.playbackParams
+                params.speed = speed
+                mp.playbackParams = params
+            }
+        } catch (e: Exception) {
+            Log.e("AudioEngine", "Error setting playback speed on MediaPlayer", e)
+        }
+    }
+
     private val _currentPositionSeconds = MutableStateFlow(0)
     val currentPositionSeconds = _currentPositionSeconds.asStateFlow()
 
@@ -112,22 +134,40 @@ class AudioEngine private constructor(private val context: android.content.Conte
 
                     setOnErrorListener { _, what, extra ->
                         Log.e("AudioEngine", "MediaPlayer error for $songId: what=$what, extra=$extra")
-                        scope.launch(Dispatchers.Main) {
-                            onSongCompletionListener?.invoke()
-                        }
+                        val wasPlaying = _isPlaying.value
                         _isPlaying.value = false
+                        if (wasPlaying) {
+                            scope.launch(Dispatchers.Main) {
+                                onSongCompletionListener?.invoke()
+                            }
+                        }
                         true
                     }
 
                     setOnCompletionListener {
+                        val wasPlaying = _isPlaying.value
                         _isPlaying.value = false
                         pause()
-                        scope.launch(Dispatchers.Main) {
-                            onSongCompletionListener?.invoke()
+                        if (wasPlaying) {
+                            scope.launch(Dispatchers.Main) {
+                                onSongCompletionListener?.invoke()
+                            }
                         }
                     }
 
                     prepare()
+                    try {
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                            val speed = _playbackSpeed.value
+                            if (speed != 1.0f) {
+                                val params = playbackParams
+                                params.speed = speed
+                                playbackParams = params
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e("AudioEngine", "Error setting speed in setSong", e)
+                    }
                 }
                 mediaPlayer = mp
                 isPlayingMedia = true
@@ -148,6 +188,7 @@ class AudioEngine private constructor(private val context: android.content.Conte
             val mp = mediaPlayer
             if (mp != null) {
                 try {
+                    applyPlaybackSpeed()
                     mp.start()
                 } catch (e: Throwable) {
                     Log.e("AudioEngine", "Error calling start() on MediaPlayer", e)
@@ -170,7 +211,8 @@ class AudioEngine private constructor(private val context: android.content.Conte
             // Mock playback for placeholder synthetic songs
             mediaPlaybackJob = scope.launch {
                 while (isActive && _isPlaying.value) {
-                    kotlinx.coroutines.delay(1000)
+                    val delayMs = (1000 / _playbackSpeed.value).toLong().coerceIn(100, 5000)
+                    kotlinx.coroutines.delay(delayMs)
                     val nextSec = _currentPositionSeconds.value + 1
                     if (nextSec >= _trackDurationSeconds.value) {
                         _currentPositionSeconds.value = _trackDurationSeconds.value

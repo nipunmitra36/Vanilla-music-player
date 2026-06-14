@@ -15,7 +15,11 @@ data class Song(
     val isFavorite: Boolean = false,
     val orderIndex: Int = 0,
     val lyrics: String = "No lyrics found", // Synchronized/scrolling lyrics
-    val artworkUri: String? = null // Real external audio album art URI string
+    val artworkUri: String? = null, // Real external audio album art URI string
+    val dateAdded: Long = System.currentTimeMillis(),
+    val recentPlayedAt: Long = 0L,
+    val playCount: Int = 0,
+    val dateModified: Long = System.currentTimeMillis()
 )
 
 @Entity(tableName = "playlists")

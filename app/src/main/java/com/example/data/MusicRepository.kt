@@ -14,7 +14,7 @@ class MusicRepository(private val context: Context) {
         Room.databaseBuilder(
             context.applicationContext,
             MusicDatabase::class.java,
-            "musicly_database_v3"
+            "musicly_database_v2"
         )
         .fallbackToDestructiveMigrationOnDowngrade()
         .fallbackToDestructiveMigration()
@@ -33,9 +33,11 @@ class MusicRepository(private val context: Context) {
 
     suspend fun initializeDatabase() = withContext(Dispatchers.IO) {
         try {
+            android.util.Log.d("MusicRepository", "Initializing database...")
             // 1. Initialise baseline equalizer
             val currentEq = equalizerDao.getEqualizerState()
             if (currentEq == null) {
+                android.util.Log.d("MusicRepository", "Seeding equalizer...")
                 equalizerDao.saveEqualizerState(
                     EqualizerState(
                         isEnabled = true,
@@ -50,6 +52,7 @@ class MusicRepository(private val context: Context) {
                 )
             }
         } catch (e: Throwable) {
+            android.util.Log.e("MusicRepository", "Error initializing database", e)
             e.printStackTrace()
         }
     }
@@ -119,7 +122,8 @@ class MusicRepository(private val context: Context) {
                 android.provider.MediaStore.Audio.Media.ALBUM,
                 android.provider.MediaStore.Audio.Media.DURATION,
                 android.provider.MediaStore.Audio.Media.ALBUM_ID,
-                android.provider.MediaStore.Audio.Media.DATA
+                android.provider.MediaStore.Audio.Media.DATA,
+                android.provider.MediaStore.Audio.Media.DATE_ADDED
             )
             // Only search for music files
             val selection = "${android.provider.MediaStore.Audio.Media.IS_MUSIC} != 0"
@@ -128,7 +132,7 @@ class MusicRepository(private val context: Context) {
                 projection,
                 selection,
                 null,
-                "${android.provider.MediaStore.Audio.Media.TITLE} ASC"
+                "${android.provider.MediaStore.Audio.Media.DATE_ADDED} DESC"
             )
 
             cursor?.use { c ->
@@ -138,6 +142,7 @@ class MusicRepository(private val context: Context) {
                 val albumCol = c.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.ALBUM)
                 val durationCol = c.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.DURATION)
                 val albumIdCol = c.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.ALBUM_ID)
+                val dateAddedCol = c.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.DATE_ADDED)
 
                 val dataCol = c.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.DATA)
 
@@ -149,6 +154,7 @@ class MusicRepository(private val context: Context) {
                     val durationMs = c.getLong(durationCol)
                     val albumId = c.getLong(albumIdCol)
                     val path = c.getString(dataCol)
+                    val dateAddedSecs = c.getLong(dateAddedCol)
 
                     val durationSecs = if (durationMs > 0) (durationMs / 1000).toInt() else 244
                     
@@ -177,6 +183,12 @@ class MusicRepository(private val context: Context) {
                     val hueColors = listOf("#1D3F23", "#4A1D20", "#4D381B", "#1F232D", "#32163F", "#1D2C3D", "#4A181C", "#232616")
                     val artworkColorHex = hueColors[(albumId % hueColors.size).toInt().coerceAtLeast(0)]
 
+                    // Use actual date added, generate other values
+                    val dateAddedValue = dateAddedSecs * 1000
+                    val dateModifiedValue = System.currentTimeMillis()
+                    val playCountValue = 0
+                    val recentPlayedValue = 0L
+
                     scannedList.add(
                         Song(
                             id = "external_$mediaId",
@@ -188,8 +200,12 @@ class MusicRepository(private val context: Context) {
                             audioPreset = listOf("ambient", "romantic", "indie", "cinematic", "bouncy").random(),
                             isFavorite = false,
                             orderIndex = scannedList.size,
-                            lyrics = "This local track coordinates on physical PCM storage. Enjoy Musicly!",
-                            artworkUri = artworkUri
+                            lyrics = "Enjoy custom synthesized beats with Musicly!\n\nTake deep breaths...\n\nFeel the harmony of premium sound.\n\nCrafted specifically for your offline pleasure.",
+                            artworkUri = artworkUri,
+                            dateAdded = dateAddedValue,
+                            dateModified = dateModifiedValue,
+                            playCount = playCountValue,
+                            recentPlayedAt = recentPlayedValue
                         )
                     )
                 }
@@ -199,8 +215,15 @@ class MusicRepository(private val context: Context) {
         }
         
         if (scannedList.isNotEmpty()) {
+            android.util.Log.d("MusicRepository", "Inserting ${scannedList.size} songs")
             songDao.insertSongs(scannedList)
+        } else {
+            android.util.Log.d("MusicRepository", "No songs scanned")
         }
         scannedList
+    }
+
+    suspend fun updateSong(song: Song) = withContext(Dispatchers.IO) {
+        songDao.updateSong(song)
     }
 }

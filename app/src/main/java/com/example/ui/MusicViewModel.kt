@@ -22,6 +22,13 @@ enum class RepeatMode {
     ONE
 }
 
+enum class SortMode {
+    A_Z,
+    Z_A,
+    DATE_MODIFIED_NEWEST,
+    DATE_MODIFIED_OLDEST
+}
+
 class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = MusicRepository(application)
     private val audioEngine = AudioEngine.getInstance(application)
@@ -51,8 +58,47 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _searchQuery = MutableStateFlow("")
     val searchQuery = _searchQuery.asStateFlow()
 
-    private val _sortDescending = MutableStateFlow(true)
-    val sortDescending = _sortDescending.asStateFlow()
+    private val prefs = application.getSharedPreferences("musicly_prefs", android.content.Context.MODE_PRIVATE)
+
+    private val _sortMode = MutableStateFlow(
+        try {
+            SortMode.valueOf(prefs.getString("sort_mode", SortMode.A_Z.name) ?: SortMode.A_Z.name)
+        } catch (e: Exception) {
+            SortMode.A_Z
+        }
+    )
+    val sortMode = _sortMode.asStateFlow()
+
+    // Persistent scroll state properties for tabs
+    var songsListScrollIndex = 0
+        private set
+    var songsListScrollOffset = 0
+        private set
+
+    var favoritesListScrollIndex = 0
+        private set
+    var favoritesListScrollOffset = 0
+        private set
+
+    var mostPlayedListScrollIndex = 0
+        private set
+    var mostPlayedListScrollOffset = 0
+        private set
+
+    fun saveSongsScrollState(index: Int, offset: Int) {
+        songsListScrollIndex = index
+        songsListScrollOffset = offset
+    }
+
+    fun saveFavoritesScrollState(index: Int, offset: Int) {
+        favoritesListScrollIndex = index
+        favoritesListScrollOffset = offset
+    }
+
+    fun saveMostPlayedScrollState(index: Int, offset: Int) {
+        mostPlayedListScrollIndex = index
+        mostPlayedListScrollOffset = offset
+    }
 
     val activeSong = audioEngine.activeSong
 
@@ -61,10 +107,52 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _repeatMode = MutableStateFlow(RepeatMode.ALL)
     val repeatMode = _repeatMode.asStateFlow()
 
+    private val _shuffleEnabled = MutableStateFlow(false)
+    val shuffleEnabled = _shuffleEnabled.asStateFlow()
+
+    private var sleepTimerJob: kotlinx.coroutines.Job? = null
+    private val _sleepTimeRemaining = MutableStateFlow<Int?>(null) // in seconds
+    val sleepTimeRemaining = _sleepTimeRemaining.asStateFlow()
+
+    fun toggleShuffle() {
+        _shuffleEnabled.value = !_shuffleEnabled.value
+    }
+
+    fun setSleepTimer(minutes: Int?) {
+        sleepTimerJob?.cancel()
+        if (minutes == null || minutes <= 0) {
+            _sleepTimeRemaining.value = null
+            return
+        }
+        _sleepTimeRemaining.value = minutes * 60
+        sleepTimerJob = viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(1000)
+                val currentRemaining = _sleepTimeRemaining.value
+                if (currentRemaining != null) {
+                    if (currentRemaining <= 1) {
+                        _sleepTimeRemaining.value = null
+                        audioEngine.pause()
+                        break
+                    } else {
+                        _sleepTimeRemaining.value = currentRemaining - 1
+                    }
+                } else {
+                    break
+                }
+            }
+        }
+    }
+
     // Observed from synthesis player
     val isPlaying = audioEngine.isPlaying
     val currentPositionSeconds = audioEngine.currentPositionSeconds
     val trackDurationSeconds = audioEngine.trackDurationSeconds
+    val playbackSpeed = audioEngine.playbackSpeed
+
+    fun setPlaybackSpeed(speed: Float) {
+        audioEngine.setPlaybackSpeed(speed)
+    }
 
     // Local Equalizer State cache
     private val _equalizerState = MutableStateFlow(EqualizerState())
@@ -95,7 +183,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _scannedFilesCount = MutableStateFlow(0)
     val scannedFilesCount = _scannedFilesCount.asStateFlow()
 
-    private val _themeMode = MutableStateFlow("Dark Forest") // Dark Forest, Slate Gray, Midnight Blue
+    private val _themeMode = MutableStateFlow(prefs.getString("theme_mode", "Dark Forest") ?: "Dark Forest") // Dark Forest, Slate Gray, Midnight Blue
     val themeMode = _themeMode.asStateFlow()
 
     private val _setupGuideCompleted = MutableStateFlow(true)
@@ -137,20 +225,30 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         audioEngine.play()
                     }
                     RepeatMode.ALL -> {
-                        val index = queue.indexOfFirst { it.id == current.id }
-                        if (index != -1) {
-                            val nextIndex = (index + 1) % queue.size
-                            setSong(queue[nextIndex])
+                        if (_shuffleEnabled.value) {
+                            val nextSong = queue.random()
+                            setSong(nextSong)
+                        } else {
+                            val index = queue.indexOfFirst { it.id == current.id }
+                            if (index != -1) {
+                                val nextIndex = (index + 1) % queue.size
+                                setSong(queue[nextIndex])
+                            }
                         }
                     }
                     RepeatMode.NONE -> {
-                        val index = queue.indexOfFirst { it.id == current.id }
-                        if (index != -1) {
-                            if (index + 1 < queue.size) {
-                                setSong(queue[index + 1])
-                            } else {
-                                audioEngine.pause()
-                                seekTo(0)
+                        if (_shuffleEnabled.value) {
+                            val nextSong = queue.random()
+                            setSong(nextSong)
+                        } else {
+                            val index = queue.indexOfFirst { it.id == current.id }
+                            if (index != -1) {
+                                if (index + 1 < queue.size) {
+                                    setSong(queue[index + 1])
+                                } else {
+                                    audioEngine.pause()
+                                    seekTo(0)
+                                }
                             }
                         }
                     }
@@ -229,8 +327,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         _searchQuery.value = query
     }
 
-    fun toggleSortOrder() {
-        _sortDescending.value = !_sortDescending.value
+    fun setSortMode(mode: SortMode) {
+        _sortMode.value = mode
+        prefs.edit().putString("sort_mode", mode.name).apply()
     }
 
     fun selectPlaylist(playlist: Playlist?) {
@@ -312,8 +411,23 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (autoplay) {
             audioEngine.play()
             startMusicService(song)
+            markSongAsPlayed(song)
         } else {
             audioEngine.pause()
+        }
+    }
+
+    fun markSongAsPlayed(song: Song) {
+        viewModelScope.launch {
+            try {
+                val updatedSong = song.copy(
+                    playCount = song.playCount + 1,
+                    recentPlayedAt = System.currentTimeMillis()
+                )
+                repository.updateSong(updatedSong)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
@@ -333,11 +447,31 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun skipNext() {
-        audioEngine.skipNext()
+        val queue = playQueue.value
+        val current = activeSong.value
+        if (queue.isNotEmpty() && current != null) {
+            val nextSong = if (_shuffleEnabled.value) {
+                queue.random()
+            } else {
+                val index = queue.indexOfFirst { it.id == current.id }
+                if (index != -1 && index < queue.size - 1) queue[index + 1] else queue.first()
+            }
+            setSong(nextSong)
+        }
     }
 
     fun skipPrevious() {
-        audioEngine.skipPrevious()
+        val queue = playQueue.value
+        val current = activeSong.value
+        if (queue.isNotEmpty() && current != null) {
+            val prevSong = if (_shuffleEnabled.value) {
+                queue.random()
+            } else {
+                val index = queue.indexOfFirst { it.id == current.id }
+                if (index > 0) queue[index - 1] else queue.last()
+            }
+            setSong(prevSong)
+        }
     }
 
     fun seekTo(seconds: Int) {
@@ -527,6 +661,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun changeTheme(theme: String) {
         _themeMode.value = theme
+        prefs.edit().putString("theme_mode", theme).apply()
     }
 
     fun setSetupGuideCompleted(completed: Boolean) {
