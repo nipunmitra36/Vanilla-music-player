@@ -1,7 +1,9 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -183,6 +185,15 @@ fun NowPlayingView(
                         .aspectRatio(1f)
                         .scale(if (isPlaying) 1.02f else 0.98f)
                         .clip(RoundedCornerShape(24.dp))
+                        .border(
+                            BorderStroke(
+                                3.dp,
+                                Brush.linearGradient(
+                                    colors = listOf(colors.accent, colors.background.copy(alpha = 0.5f), colors.accent)
+                                )
+                            ),
+                            RoundedCornerShape(24.dp)
+                        )
                         .background(safeParseColor(song.artworkColorHex))
                         .testTag("artwork_card"),
                     contentAlignment = Alignment.Center

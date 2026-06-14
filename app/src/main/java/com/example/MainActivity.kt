@@ -112,6 +112,8 @@ class MainActivity : ComponentActivity() {
 
                         if (toRequest.isNotEmpty()) {
                             permissionLauncher.launch(toRequest.toTypedArray())
+                        } else {
+                            viewModel.scanMedia()
                         }
                     } catch (e: Throwable) {
                         e.printStackTrace()

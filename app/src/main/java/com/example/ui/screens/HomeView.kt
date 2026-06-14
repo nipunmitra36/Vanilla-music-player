@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import kotlinx.coroutines.launch
 import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -175,95 +177,105 @@ fun HomeView(
             )
 
             // Content based on tab
-            Box(modifier = Modifier.weight(1f)) {
-                when (selectedTab) {
-                    "Songs" -> {
-                        SongsTabContent(
-                            viewModel = viewModel,  // ADDED
-                            songs = filteredSongs,
-                            activeSong = activeSong,
-                            colors = colors,
-                            sortMode = sortMode,
-                            onSortModeSelect = { viewModel.setSortMode(it) },
-                            onSongSelect = { viewModel.playSongFromList(it, filteredSongs) },
-                            onMoreOptions = {
-                                songSelectedForPlaylist = it
-                                showSongActionsDialog = true
-                            },
-                            onFavoriteToggle = { viewModel.toggleFavorite(it) }
-                        )
-                    }
-                    "Favorites" -> {
-                        val favoriteSongs = remember(allSongs) {
-                            allSongs.filter { it.isFavorite }
+            AnimatedContent(
+                targetState = selectedTab,
+                transitionSpec = {
+                    fadeIn(animationSpec = tween(300)) togetherWith fadeOut(animationSpec = tween(300))
+                },
+                label = "TabTransition"
+            ) { targetTab ->
+                Box(modifier = Modifier.weight(1f)) {
+                    when (targetTab) {
+                        "Songs" -> {
+                            SongsTabContent(
+                                viewModel = viewModel,
+                                songs = filteredSongs,
+                                activeSong = activeSong,
+                                colors = colors,
+                                sortMode = sortMode,
+                                onSortModeSelect = { viewModel.setSortMode(it) },
+                                onSongSelect = { viewModel.playSongFromList(it, filteredSongs) },
+                                onMoreOptions = {
+                                    songSelectedForPlaylist = it
+                                    showSongActionsDialog = true
+                                },
+                                onFavoriteToggle = { viewModel.toggleFavorite(it) }
+                            )
                         }
-                        FavoritesTabContent(
-                            songs = favoriteSongs,
-                            activeSong = activeSong,
-                            colors = colors,
-                            onSongSelect = { viewModel.playSongFromList(it, favoriteSongs) },
-                            onMoreOptions = {
-                                songSelectedForPlaylist = it
-                                showSongActionsDialog = true
-                            },
-                            onFavoriteToggle = { viewModel.toggleFavorite(it) }
-                        )
-                    }
-                    "Most Played" -> {
-                        val mostPlayedSongs = remember(allSongs) {
-                            allSongs.sortedByDescending { (it.id.hashCode() % 13) + (it.durationSeconds % 5) }
+                        "Favorites" -> {
+                            val favoriteSongs = remember(allSongs) {
+                                allSongs.filter { it.isFavorite }
+                            }
+                            FavoritesTabContent(
+                                songs = favoriteSongs,
+                                activeSong = activeSong,
+                                colors = colors,
+                                isMostPlayed = false,
+                                onSongSelect = { viewModel.playSongFromList(it, favoriteSongs) },
+                                onMoreOptions = {
+                                    songSelectedForPlaylist = it
+                                    showSongActionsDialog = true
+                                },
+                                onFavoriteToggle = { viewModel.toggleFavorite(it) }
+                            )
                         }
-                        FavoritesTabContent(
-                            songs = mostPlayedSongs,
-                            activeSong = activeSong,
-                            colors = colors,
-                            onSongSelect = { viewModel.playSongFromList(it, mostPlayedSongs) },
-                            onMoreOptions = {
-                                songSelectedForPlaylist = it
-                                showSongActionsDialog = true
-                            },
-                            onFavoriteToggle = { viewModel.toggleFavorite(it) }
-                        )
-                    }
-                    "Playlists" -> {
-                        PlaylistsTabContent(
-                            playlists = playlists,
-                            colors = colors,
-                            onCreatePlaylistClick = { showCreatePlaylistDialog = true },
-                            onPlaylistClick = { playlist ->
-                                viewModel.selectPlaylist(playlist)
-                                viewModel.navigateTo(ScreenState.PLAYLIST_DETAILS)
-                            },
-                            onPlaylistDelete = { viewModel.deletePlaylist(it.id) }
-                        )
-                    }
-                    "Albums" -> {
-                        AlbumsTabContent(
-                            songs = allSongs,
-                            colors = colors,
-                            onSongSelect = { viewModel.playSongFromList(it, allSongs) }
-                        )
-                    }
-                    "Artists" -> {
-                        ArtistsTabContent(
-                            songs = allSongs,
-                            colors = colors,
-                            onSongSelect = { viewModel.playSongFromList(it, allSongs) }
-                        )
-                    }
-                    "Genres" -> {
-                        GenresTabContent(
-                            songs = allSongs,
-                            colors = colors,
-                            onSongSelect = { viewModel.playSongFromList(it, allSongs) }
-                        )
-                    }
-                    "Folders" -> {
-                        FoldersTabContent(
-                            songs = allSongs,
-                            colors = colors,
-                            onSongSelect = { viewModel.playSongFromList(it, allSongs) }
-                        )
+                        "Most Played" -> {
+                            val mostPlayedSongs = remember(allSongs) {
+                                allSongs.filter { it.playCount > 0 }.sortedByDescending { it.playCount }
+                            }
+                            FavoritesTabContent(
+                                songs = mostPlayedSongs,
+                                activeSong = activeSong,
+                                colors = colors,
+                                isMostPlayed = true,
+                                onSongSelect = { viewModel.playSongFromList(it, mostPlayedSongs) },
+                                onMoreOptions = {
+                                    songSelectedForPlaylist = it
+                                    showSongActionsDialog = true
+                                },
+                                onFavoriteToggle = { viewModel.toggleFavorite(it) }
+                            )
+                        }
+                        "Playlists" -> {
+                            PlaylistsTabContent(
+                                playlists = playlists,
+                                colors = colors,
+                                onCreatePlaylistClick = { showCreatePlaylistDialog = true },
+                                onPlaylistClick = { playlist ->
+                                    viewModel.selectPlaylist(playlist)
+                                    viewModel.navigateTo(ScreenState.PLAYLIST_DETAILS)
+                                },
+                                onPlaylistDelete = { viewModel.deletePlaylist(it.id) }
+                            )
+                        }
+                        "Albums" -> {
+                            AlbumsTabContent(
+                                songs = allSongs,
+                                colors = colors,
+                                onSongSelect = { viewModel.playSongFromList(it, allSongs) }
+                            )
+                        }
+                        "Artists" -> {
+                            ArtistsTabContent(
+                                songs = allSongs,
+                                colors = colors,
+                                onSongSelect = { viewModel.playSongFromList(it, allSongs) }
+                            )
+                        }
+                        "Genres" -> {
+                            GenresTabContent(
+                                songs = allSongs,
+                                colors = colors,
+                                onSongSelect = { viewModel.playSongFromList(it, allSongs) }
+                            )
+                        }
+                        "Folders" -> {
+                            FoldersTabContent(
+                                songs = allSongs,
+                                colors = colors,
+                                onSongSelect = { viewModel.playSongFromList(it, allSongs) }
+                            )
+                        }
                     }
                 }
             }
@@ -353,6 +365,7 @@ fun HomeView(
     // Song Actions Options Dialog
     if (showSongActionsDialog && songSelectedForPlaylist != null) {
         val song = songSelectedForPlaylist!!
+        val context = androidx.compose.ui.platform.LocalContext.current
         AlertDialog(
             onDismissRequest = { showSongActionsDialog = false },
             title = { Text(song.title, color = colors.textPrimary, fontWeight = FontWeight.Bold) },
@@ -419,6 +432,62 @@ fun HomeView(
                             color = colors.textPrimary,
                             fontSize = 15.sp
                         )
+                    }
+
+                    // Share Row
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable {
+                                val songId = song.id.substringAfter("external_").toLongOrNull() ?: return@clickable
+                                val songUri = android.content.ContentUris.withAppendedId(
+                                    android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                                    songId
+                                )
+                                val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                    type = "audio/*"
+                                    putExtra(android.content.Intent.EXTRA_STREAM, songUri)
+                                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                val chooser = android.content.Intent.createChooser(intent, "Share Song")
+                                context.startActivity(chooser)
+                                showSongActionsDialog = false
+                            }
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null, tint = colors.accent)
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text("Share", color = colors.textPrimary, fontSize = 15.sp)
+                    }
+
+                    // Ringtone Row
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable {
+                                val songId = song.id.substringAfter("external_").toLongOrNull() ?: return@clickable
+                                val songUri = android.content.ContentUris.withAppendedId(
+                                    android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                                    songId
+                                )
+                                // Simple approach for ringtone, might need more permissions
+                                val intent = android.content.Intent(android.media.RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+                                    putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_TYPE, android.media.RingtoneManager.TYPE_RINGTONE)
+                                    putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_TITLE, "Select Ringtone")
+                                    putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, songUri)
+                                }
+                                context.startActivity(intent)
+                                showSongActionsDialog = false
+                            }
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.RingVolume, contentDescription = null, tint = colors.accent)
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text("Set as Ringtone", color = colors.textPrimary, fontSize = 15.sp)
                     }
                 }
             },
@@ -562,7 +631,7 @@ fun SongsTabContent(
                     modifier = Modifier.size(16.dp)
                 )
                 Text(
-                    text = "Sort By",
+                    text = "Sort By (${songs.size})",
                     color = colors.textSecondary,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold
@@ -648,8 +717,8 @@ fun SongsTabContent(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 2.dp)
-                            .clip(RoundedCornerShape(16.dp))
+                            .padding(horizontal = 12.dp, vertical = 1.dp)
+                            .clip(RoundedCornerShape(12.dp))
                             .background(if (isActive) colors.selectedBackground.copy(alpha = 0.8f) else Color.Transparent)
                             .combinedClickable(
                                 onClick = { onSongSelect(song) },
@@ -779,6 +848,7 @@ fun FavoritesTabContent(
     songs: List<Song>,
     activeSong: Song?,
     colors: ColorPalette,
+    isMostPlayed: Boolean = false,
     onSongSelect: (Song) -> Unit,
     onMoreOptions: (Song) -> Unit,
     onFavoriteToggle: (Song) -> Unit
@@ -802,20 +872,24 @@ fun FavoritesTabContent(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.FavoriteBorder,
-                        contentDescription = "No favorites",
+                        imageVector = if (isMostPlayed) Icons.Default.PlayArrow else Icons.Default.FavoriteBorder,
+                        contentDescription = if (isMostPlayed) "No played songs" else "No favorites",
                         tint = colors.textSecondary,
                         modifier = Modifier.size(36.dp)
                     )
                 }
                 Text(
-                    text = "No favorites yet",
+                    text = if (isMostPlayed) "No played songs yet" else "No favorites yet",
                     color = colors.textPrimary,
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp
                 )
                 Text(
-                    text = "Tap the heart icon on any song to add it to your premium offline Favorites collection.",
+                    text = if (isMostPlayed) {
+                        "Listen to your premium offline songs to build your personalized top tracks dashboard!"
+                    } else {
+                        "Tap the heart icon on any song to add it to your premium offline Favorites collection."
+                    },
                     color = colors.textSecondary,
                     fontSize = 14.sp,
                     textAlign = TextAlign.Center,
@@ -842,7 +916,7 @@ fun FavoritesTabContent(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    text = "${songs.size} favorite songs",
+                    text = if (isMostPlayed) "${songs.size} premium top tracks" else "${songs.size} favorite songs",
                     color = colors.textPrimary,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold
@@ -1183,49 +1257,35 @@ fun AlbumsTabContent(
         songs.groupBy { it.album }
     }
 
-    LazyColumn(
+    androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+        columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(2),
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp, bottom = 80.dp)
+        contentPadding = PaddingValues(16.dp, bottom = 80.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        items(albums.keys.toList()) { album ->
+        val albumList = albums.keys.toList()
+        items(albumList.size) { index ->
+            val album = albumList[index]
             val albumSongs = albums[album] ?: emptyList()
+            if (album == null) return@items
+            val albumCover = getFeaturedImageSource(albumSongs.first())
+            
             Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 6.dp),
+                modifier = Modifier.fillMaxWidth().aspectRatio(0.85f).clickable { /* TODO: show songs of album */ },
                 colors = CardDefaults.cardColors(containerColor = colors.surface),
                 shape = RoundedCornerShape(14.dp)
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(50.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(colors.accent.copy(alpha = 0.2f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.Album, contentDescription = null, tint = colors.accent, modifier = Modifier.size(28.dp))
-                        }
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column {
-                            Text(album, color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                            Text("${albumSongs.size} songs", color = colors.textSecondary, fontSize = 13.sp)
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(12.dp))
-                    albumSongs.forEach { song ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onSongSelect(song) }
-                                .padding(vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = colors.accent, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(song.title, color = colors.textPrimary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
+                Column {
+                    AsyncImage(
+                        model = albumCover,
+                        contentDescription = "Album cover",
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        contentScale = ContentScale.Crop
+                    )
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(album, color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("${albumSongs.size} songs", color = colors.textSecondary, fontSize = 12.sp)
                     }
                 }
             }

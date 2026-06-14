@@ -39,14 +39,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             android.util.Log.e("MusicViewModel", "Database error collecting songs", e)
             emit(emptyList())
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val allPlaylists = repository.allPlaylistsFlow
         .catch { e ->
             android.util.Log.e("MusicViewModel", "Database error collecting playlists", e)
             emit(emptyList())
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     // Active state flows
     private val _currentScreen = MutableStateFlow(ScreenState.HOME)
@@ -180,6 +180,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _isScanning = MutableStateFlow(false)
     val isScanning = _isScanning.asStateFlow()
 
+    private var mediaObserverRegistered = false
+
     private val _scannedFilesCount = MutableStateFlow(0)
     val scannedFilesCount = _scannedFilesCount.asStateFlow()
 
@@ -256,19 +258,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
+        // 1. Observe EQ settings independently and immediately
         viewModelScope.launch {
             try {
-                // Seed database
-                repository.initializeDatabase()
-                
-                // Auto scan local MediaStore on startup
-                try {
-                    repository.scanLocalMediaStoreSongs()
-                } catch (e: Throwable) {
-                    e.printStackTrace()
-                }
-
-                // Read active EQ
                 repository.equalizerSettingsFlow
                     .catch { e -> android.util.Log.e("MusicViewModel", "Error in EQ flow", e) }
                     .collect { eq ->
@@ -282,35 +274,51 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Auto play queue setup once songs are loaded
+        // 2. Seed and scan MediaStore sequentially
         viewModelScope.launch {
             try {
-                allSongs.collect { songs ->
-                    if (songs.isNotEmpty()) {
-                        // Keep current queue filtered to only contain existing database songs
-                        audioEngine.playQueue.value = audioEngine.playQueue.value.filter { q -> songs.any { s -> s.id == q.id } }
-                        if (audioEngine.playQueue.value.isEmpty()) {
-                            audioEngine.playQueue.value = songs
-                        }
-                        // set default first song (but don't autoplay until tapped)
-                        if (audioEngine.activeSong.value == null) {
-                            setSong(songs.first(), autoplay = false)
-                        } else if (!songs.any { it.id == audioEngine.activeSong.value?.id }) {
-                            // Active song was deleted, load first available
-                            val nextFirst = songs.firstOrNull()
-                            if (nextFirst != null) {
-                                setSong(nextFirst, autoplay = false)
-                            } else {
-                                audioEngine.activeSong.value = null
+                // Seed database first
+                repository.initializeDatabase()
+                
+                // Auto scan local MediaStore on startup
+                try {
+                    repository.scanLocalMediaStoreSongs()
+                } catch (e: Throwable) {
+                    e.printStackTrace()
+                }
+
+                // Register ContentObserver for automatic updates
+                try {
+                    repository.registerMediaObserver {
+                        viewModelScope.launch {
+                            try {
+                                repository.scanLocalMediaStoreSongs()
+                            } catch (e: Throwable) {
+                                e.printStackTrace()
                             }
                         }
-                    } else {
-                        audioEngine.playQueue.value = emptyList()
-                        audioEngine.activeSong.value = null
+                    }
+                } catch (e: Throwable) {
+                    e.printStackTrace()
+                }
+            } catch (e: Throwable) {
+                e.printStackTrace()
+            }
+        }
+
+        // 3. Auto play queue setup (one-shot initialization when songs flow becomes populated)
+        viewModelScope.launch {
+            try {
+                allSongs.filter { it.isNotEmpty() }.firstOrNull()?.let { songs ->
+                    if (audioEngine.playQueue.value.isEmpty()) {
+                        audioEngine.playQueue.value = songs
+                    }
+                    if (audioEngine.activeSong.value == null && songs.isNotEmpty()) {
+                        setSong(songs.first(), autoplay = false)
                     }
                 }
             } catch (e: Throwable) {
-                android.util.Log.e("MusicViewModel", "Error collecting auto play queue", e)
+                android.util.Log.e("MusicViewModel", "Error initializing play queue", e)
             }
         }
     }
@@ -549,13 +557,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private val _activeEqPreset = MutableStateFlow("Custom")
+    private val _activeEqPreset = MutableStateFlow(prefs.getString("active_eq_preset", "Custom") ?: "Custom")
     val activeEqPreset = _activeEqPreset.asStateFlow()
+
+    private fun updateActiveEqPreset(preset: String) {
+        _activeEqPreset.value = preset
+        prefs.edit().putString("active_eq_preset", preset).apply()
+    }
 
     // Equalizer Controls
     fun updateEqualizerBand(band: String, value: Float) {
         viewModelScope.launch {
-            _activeEqPreset.value = "Custom"
+            updateActiveEqPreset("Custom")
             val oldState = _equalizerState.value
             val newState = when(band) {
                 "60Hz" -> oldState.copy(band60Hz = value)
@@ -582,7 +595,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun applyEqualizerPreset(preset: String) {
         viewModelScope.launch {
-            _activeEqPreset.value = preset
+            updateActiveEqPreset(preset)
             val state = _equalizerState.value
             val newState = when (preset) {
                 "Balanced" -> state.copy(band60Hz = 0f, band230Hz = 0f, band910Hz = 0f, band3600Hz = 0f, band14000Hz = 0f)
@@ -642,6 +655,26 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val results = repository.scanLocalMediaStoreSongs()
+                
+                // Safely wire the auto-scan ContentObserver now that we are sure permissions exist
+                if (!mediaObserverRegistered) {
+                    try {
+                        repository.registerMediaObserver {
+                            viewModelScope.launch {
+                                try {
+                                    repository.scanLocalMediaStoreSongs()
+                                } catch (e: Throwable) {
+                                    e.printStackTrace()
+                                }
+                            }
+                        }
+                        mediaObserverRegistered = true
+                        android.util.Log.d("MusicViewModel", "MediaStore content observer successfully registered.")
+                    } catch (observerEx: Exception) {
+                        observerEx.printStackTrace()
+                    }
+                }
+
                 val targetCount = results.size.coerceAtLeast(8)
                 for (i in 1..targetCount) {
                     kotlinx.coroutines.delay(100)

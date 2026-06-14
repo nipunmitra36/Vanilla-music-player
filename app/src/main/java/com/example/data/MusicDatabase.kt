@@ -8,6 +8,9 @@ interface SongDao {
     @Query("SELECT * FROM songs ORDER BY orderIndex ASC")
     fun getAllSongsFlow(): Flow<List<Song>>
 
+    @Query("SELECT * FROM songs ORDER BY orderIndex ASC")
+    suspend fun getAllSongs(): List<Song>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSongs(songs: List<Song>)
 
@@ -78,7 +81,7 @@ interface EqualizerDao {
 
 @Database(
     entities = [Song::class, Playlist::class, PlaylistSongCrossRef::class, EqualizerState::class],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class MusicDatabase : RoomDatabase() {
