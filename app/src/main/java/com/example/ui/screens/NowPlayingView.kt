@@ -1,6 +1,9 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.*
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -41,6 +44,8 @@ fun NowPlayingView(
 ) {
     val activeSong by viewModel.activeSong.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
+    val isPreparing by viewModel.isPreparing.collectAsState()
+    val isBuffering by viewModel.isBuffering.collectAsState()
     val currentPositionSeconds by viewModel.currentPositionSeconds.collectAsState()
     val trackDurationSeconds by viewModel.trackDurationSeconds.collectAsState()
     val isLyricsExpanded by viewModel.isLyricsExpanded.collectAsState()
@@ -48,7 +53,20 @@ fun NowPlayingView(
     val shuffleEnabled by viewModel.shuffleEnabled.collectAsState()
     val sleepTimeRemaining by viewModel.sleepTimeRemaining.collectAsState()
     val playbackSpeed by viewModel.playbackSpeed.collectAsState()
+    val lyricsStatus by viewModel.lyricsDownloadStatus.collectAsState()
     var showMoreOptionsDialog by remember { mutableStateOf(false) }
+    var showLyricsEditor by remember { mutableStateOf(false) }
+
+    var dragProgress by remember { mutableStateOf<Float?>(null) }
+
+    val artworkScale by animateFloatAsState(
+        targetValue = if (isPlaying) 1.04f else 0.96f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "ArtworkScale"
+    )
 
     if (activeSong == null) {
         Box(
@@ -72,17 +90,52 @@ fun NowPlayingView(
         String.format("%02d:%02d", m, s)
     }
 
-    // Lyrics calculation (highlight active line)
-    val lyricLines = remember(song.lyrics) {
-        song.lyrics.split("\n\n").filter { it.isNotBlank() }
+    // LRC Lyrics Line definition
+    data class NowPlayingLRCLine(val timeSecs: Int, val text: String)
+
+    val lrcLines = remember(song.lyrics) {
+        val lines = song.lyrics.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+        val timeRegex = """\[(\d+):(\d+)(?:\.(\d+))?]""".toRegex()
+        val list = ArrayList<NowPlayingLRCLine>()
+        for (line in lines) {
+            val match = timeRegex.find(line)
+            if (match != null) {
+                val min = match.groupValues[1].toIntOrNull() ?: 0
+                val sec = match.groupValues[2].toIntOrNull() ?: 0
+                val totalSec = min * 60 + sec
+                val text = line.replace(timeRegex, "").trim()
+                list.add(NowPlayingLRCLine(totalSec, text))
+            } else {
+                list.add(NowPlayingLRCLine(-1, line))
+            }
+        }
+        
+        var lastTime = 0
+        val finalList = list.mapIndexed { idx, item ->
+            if (item.timeSecs == -1) {
+                val generatedTime = lastTime + 5
+                lastTime = generatedTime
+                NowPlayingLRCLine(generatedTime, item.text)
+            } else {
+                lastTime = item.timeSecs
+                item
+            }
+        }
+        finalList.sortedBy { it.timeSecs }
     }
-    
-    val activeLineIndex = remember(lyricLines, currentPositionSeconds, trackDurationSeconds) {
-        if (lyricLines.isEmpty() || trackDurationSeconds == 0) 0
+
+    val activeLineIndex = remember(lrcLines, currentPositionSeconds) {
+        if (lrcLines.isEmpty()) 0
         else {
-            val step = trackDurationSeconds.toFloat() / lyricLines.size
-            val calcIdx = (currentPositionSeconds / step).toInt()
-            calcIdx.coerceIn(0, lyricLines.size - 1)
+            var index = 0
+            for (i in lrcLines.indices) {
+                if (lrcLines[i].timeSecs <= currentPositionSeconds) {
+                    index = i
+                } else {
+                    break
+                }
+            }
+            index.coerceIn(0, lrcLines.size - 1)
         }
     }
 
@@ -90,8 +143,8 @@ fun NowPlayingView(
 
     // Smooth lyrics auto-scroll sync based on active index
     LaunchedEffect(activeLineIndex) {
-        if (lyricLines.isNotEmpty() && isLyricsExpanded) {
-            val approxHeight = lyricsScrollState.maxValue.toFloat() / lyricLines.size
+        if (lrcLines.isNotEmpty() && isLyricsExpanded) {
+            val approxHeight = lyricsScrollState.maxValue.toFloat() / lrcLines.size
             lyricsScrollState.animateScrollTo((activeLineIndex * approxHeight).toInt())
         }
     }
@@ -183,7 +236,7 @@ fun NowPlayingView(
                     modifier = Modifier
                         .fillMaxWidth(0.85f)
                         .aspectRatio(1f)
-                        .scale(if (isPlaying) 1.02f else 0.98f)
+                        .scale(artworkScale)
                         .clip(RoundedCornerShape(24.dp))
                         .border(
                             BorderStroke(
@@ -205,43 +258,89 @@ fun NowPlayingView(
                         contentScale = ContentScale.Crop,
                         error = androidx.compose.ui.graphics.painter.ColorPainter(Color.Transparent)
                     )
+
+                    if (isPreparing || isBuffering) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.45f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                color = colors.accent,
+                                strokeWidth = 3.dp,
+                                modifier = Modifier.size(54.dp)
+                            )
+                        }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(36.dp))
 
-                // Song Title & Artists descriptors
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.Start
+                // Song Title & Artists descriptors Row with Favorite on the right
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text(
-                        text = song.title,
-                        color = colors.textPrimary,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 24.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.testTag("track_title_text")
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = song.artist,
-                        color = colors.textSecondary,
-                        fontSize = 16.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.testTag("track_artist_text")
-                    )
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.Start
+                    ) {
+                        Text(
+                            text = song.title,
+                            color = colors.textPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 24.sp,
+                            letterSpacing = 0.5.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.testTag("track_title_text")
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = song.artist,
+                            color = colors.textSecondary,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.testTag("track_artist_text")
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(16.dp))
+
+                    // Properly positioned and sized heart toggle icon
+                    IconButton(
+                        onClick = { viewModel.toggleFavorite(song) },
+                        modifier = Modifier
+                            .size(56.dp)
+                            .testTag("favorite_button")
+                    ) {
+                        Icon(
+                            imageVector = if (song.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                            contentDescription = "Favorite Toggle",
+                            tint = if (song.isFavorite) androidx.compose.ui.graphics.Color(0xFFFF1744) else colors.textPrimary.copy(alpha = 0.6f),
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(28.dp))
 
                 // High-fidelity Progress Slider
                 Slider(
-                    value = progress,
+                    value = dragProgress ?: progress,
                     onValueChange = { newValue ->
-                        val targetSecs = (newValue * trackDurationSeconds).toInt()
-                        viewModel.seekTo(targetSecs)
+                        dragProgress = newValue
+                    },
+                    onValueChangeFinished = {
+                        val targetSeconds = ((dragProgress ?: progress) * trackDurationSeconds).toInt()
+                        viewModel.seekTo(targetSeconds)
+                        dragProgress = null
                     },
                     colors = SliderDefaults.colors(
                         thumbColor = colors.accent,
@@ -261,10 +360,16 @@ fun NowPlayingView(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = formatTime(currentPositionSeconds),
-                        color = colors.textSecondary,
+                        text = formatTime(
+                            if (dragProgress != null) {
+                                (dragProgress!! * trackDurationSeconds).toInt()
+                            } else {
+                                currentPositionSeconds
+                            }
+                        ),
+                        color = colors.textPrimary.copy(alpha = 0.8f),
                         fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.SemiBold
                     )
                     Text(
                         text = formatTime(trackDurationSeconds),
@@ -282,24 +387,33 @@ fun NowPlayingView(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Repeat mode toggle
+                    // Shuffle mode toggle
                     IconButton(
-                        onClick = { viewModel.toggleRepeatMode() },
+                        onClick = { viewModel.toggleShuffle() },
                         modifier = Modifier
-                            .size(48.dp)
-                            .testTag("repeat_toggle_button")
+                            .size(44.dp)
+                            .testTag("shuffle_toggle_button")
                     ) {
                         Icon(
-                            imageVector = when (repeatMode) {
-                                com.example.ui.RepeatMode.ONE -> Icons.Default.RepeatOne
-                                else -> Icons.Default.Repeat
-                            },
-                            contentDescription = "Toggle Repeat Options",
-                            tint = when (repeatMode) {
-                                com.example.ui.RepeatMode.NONE -> colors.textSecondary.copy(alpha = 0.4f)
-                                else -> colors.accent
-                            },
-                            modifier = Modifier.size(24.dp)
+                            imageVector = Icons.Default.Shuffle,
+                            contentDescription = "Toggle Shuffle mode",
+                            tint = if (shuffleEnabled) colors.accent else colors.textPrimary.copy(alpha = 0.4f),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    // Skip Back 15s
+                    IconButton(
+                        onClick = { viewModel.skipBackward15() },
+                        modifier = Modifier
+                            .size(44.dp)
+                            .testTag("skip_backward_15_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.RotateLeft,
+                            contentDescription = "Rewind 15s",
+                            tint = colors.textPrimary,
+                            modifier = Modifier.size(22.dp)
                         )
                     }
 
@@ -307,14 +421,14 @@ fun NowPlayingView(
                     IconButton(
                         onClick = { viewModel.skipPrevious() },
                         modifier = Modifier
-                            .size(56.dp)
+                            .size(44.dp)
                             .testTag("skip_previous_button")
                     ) {
                         Icon(
                             imageVector = Icons.Default.SkipPrevious,
                             contentDescription = "Skip Previous",
                             tint = colors.textPrimary,
-                            modifier = Modifier.size(36.dp)
+                            modifier = Modifier.size(24.dp)
                         )
                     }
 
@@ -322,45 +436,74 @@ fun NowPlayingView(
                     IconButton(
                         onClick = { viewModel.togglePlayPause() },
                         modifier = Modifier
-                            .size(72.dp)
+                            .size(64.dp)
                             .background(colors.selectedBackground, CircleShape)
                             .testTag("play_pause_toggle")
                     ) {
-                        Icon(
-                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = "Play/Pause Toggle",
-                            tint = colors.accent,
-                            modifier = Modifier.size(38.dp)
-                        )
+                        if (isPreparing || isBuffering) {
+                            CircularProgressIndicator(
+                                color = colors.accent,
+                                strokeWidth = 3.dp,
+                                modifier = Modifier.size(30.dp)
+                            )
+                        } else {
+                            Icon(
+                                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = "Play/Pause Toggle",
+                                tint = colors.accent,
+                                modifier = Modifier.size(34.dp)
+                            )
+                        }
                     }
 
                     // Skip Next
                     IconButton(
                         onClick = { viewModel.skipNext() },
                         modifier = Modifier
-                            .size(56.dp)
+                            .size(44.dp)
                             .testTag("skip_next_button")
                     ) {
                         Icon(
                             imageVector = Icons.Default.SkipNext,
                             contentDescription = "Skip Next",
                             tint = colors.textPrimary,
-                            modifier = Modifier.size(36.dp)
+                            modifier = Modifier.size(24.dp)
                         )
                     }
 
-                    // Heart toggle
+                    // Skip Forward 15s
                     IconButton(
-                        onClick = { viewModel.toggleFavorite(song) },
+                        onClick = { viewModel.skipForward15() },
                         modifier = Modifier
-                            .size(48.dp)
-                            .testTag("favorite_button")
+                            .size(44.dp)
+                            .testTag("skip_forward_15_button")
                     ) {
                         Icon(
-                            imageVector = if (song.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                            contentDescription = "Favorite Toggle",
-                            tint = if (song.isFavorite) Color.Red else colors.textPrimary,
-                            modifier = Modifier.size(24.dp)
+                            imageVector = Icons.Default.RotateRight,
+                            contentDescription = "Forward 15s",
+                            tint = colors.textPrimary,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    // Repeat mode toggle
+                    IconButton(
+                        onClick = { viewModel.toggleRepeatMode() },
+                        modifier = Modifier
+                            .size(44.dp)
+                            .testTag("repeat_toggle_button")
+                    ) {
+                        Icon(
+                            imageVector = when (repeatMode) {
+                                com.example.ui.RepeatMode.ONE -> Icons.Default.RepeatOne
+                                else -> Icons.Default.Repeat
+                            },
+                            contentDescription = "Toggle Repeat mode",
+                            tint = when (repeatMode) {
+                                com.example.ui.RepeatMode.NONE -> colors.textPrimary.copy(alpha = 0.4f)
+                                else -> colors.accent
+                            },
+                            modifier = Modifier.size(22.dp)
                         )
                     }
                 }
@@ -395,8 +538,90 @@ fun NowPlayingView(
                         .padding(16.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (lyricLines.isEmpty()) {
-                        Text("No lyrics found.", color = colors.textSecondary)
+                    if (lyricsStatus != null) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                            modifier = Modifier.padding(24.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                color = colors.accent,
+                                strokeWidth = 3.dp,
+                                modifier = Modifier.size(44.dp)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "MUSICLY AI ENGINE",
+                                color = colors.accent,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 2.sp
+                            )
+                            Text(
+                                text = lyricsStatus ?: "",
+                                color = colors.textPrimary,
+                                fontSize = 14.sp,
+                                textAlign = TextAlign.Center,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    } else if (lrcLines.isEmpty() || song.lyrics.isBlank() || song.lyrics == "No lyrics found") {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                            modifier = Modifier.padding(20.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(64.dp)
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(colors.accent.copy(alpha = 0.12f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AutoAwesome,
+                                    contentDescription = null,
+                                    tint = colors.accent,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            }
+                            Text(
+                                text = "AI Lyrics Synchronizer",
+                                color = colors.textPrimary,
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "No synchronized lyrics metadata was found in this file. Let our local AI core synthesize perfectly synced LRC scrolling lyrics.",
+                                color = colors.textSecondary,
+                                fontSize = 12.sp,
+                                textAlign = TextAlign.Center,
+                                lineHeight = 18.sp
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(
+                                onClick = { viewModel.downloadLyricsForSong(song) },
+                                colors = ButtonDefaults.buttonColors(containerColor = colors.accent),
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.AutoAwesome,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = "Synthesize AI Lyrics",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp
+                                    )
+                                }
+                            }
+                        }
                     } else {
                         Column(
                             modifier = Modifier
@@ -406,17 +631,17 @@ fun NowPlayingView(
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Spacer(modifier = Modifier.height(100.dp))
-                            lyricLines.forEachIndexed { idx, line ->
+                            lrcLines.forEachIndexed { idx, item ->
                                 val isActive = (idx == activeLineIndex)
                                 Text(
-                                    text = line,
+                                    text = item.text,
                                     color = if (isActive) colors.accent else colors.textPrimary.copy(alpha = 0.5f),
                                     fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
-                                    fontSize = if (isActive) 20.sp else 16.sp,
+                                    fontSize = if (isActive) 22.sp else 16.sp,
                                     textAlign = TextAlign.Center,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clickable { viewModel.seekTo((idx * (trackDurationSeconds / lyricLines.size.toFloat())).toInt()) }
+                                        .clickable { viewModel.seekTo(item.timeSecs) }
                                         .padding(vertical = 4.dp)
                                 )
                             }
@@ -433,8 +658,19 @@ fun NowPlayingView(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    IconButton(onClick = { viewModel.toggleLyricsExpanded() }) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Close lyrics", tint = colors.textPrimary)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        IconButton(onClick = { viewModel.toggleLyricsExpanded() }) {
+                            Icon(Icons.Default.ArrowBack, contentDescription = "Close lyrics", tint = colors.textPrimary)
+                        }
+                        IconButton(
+                            onClick = { showLyricsEditor = true },
+                            modifier = Modifier.testTag("edit_lyrics_button")
+                        ) {
+                            Icon(Icons.Default.Edit, contentDescription = "Edit lyrics", tint = colors.accent)
+                        }
                     }
 
                     Row(
@@ -470,6 +706,61 @@ fun NowPlayingView(
                 }
             }
         }
+    }
+
+    if (showLyricsEditor) {
+        var editingText by remember { mutableStateOf(song.lyrics) }
+        AlertDialog(
+            onDismissRequest = { showLyricsEditor = false },
+            title = { Text("Edit LRC Lyrics", color = colors.textPrimary, fontWeight = FontWeight.Bold) },
+            containerColor = colors.surface,
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Tag rows with [mm:ss] (e.g. [00:15] My lyric line) to link and sync highlights to seconds during playing.",
+                        color = colors.textSecondary,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp
+                    )
+                    OutlinedTextField(
+                        value = editingText,
+                        onValueChange = { editingText = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(240.dp)
+                            .testTag("lyrics_editor_input"),
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp, color = colors.textPrimary),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = colors.textPrimary,
+                            unfocusedTextColor = colors.textPrimary,
+                            focusedBorderColor = colors.accent,
+                            unfocusedBorderColor = colors.textSecondary.copy(alpha = 0.4f),
+                            focusedContainerColor = colors.background,
+                            unfocusedContainerColor = colors.background
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.updateLyrics(song, editingText)
+                        showLyricsEditor = false
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = colors.accent)
+                ) {
+                    Text("Save", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showLyricsEditor = false },
+                    colors = ButtonDefaults.textButtonColors(contentColor = colors.textSecondary)
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     if (showMoreOptionsDialog) {
@@ -513,86 +804,114 @@ fun MorePlaybackOptionsDialog(
         confirmButton = {
             TextButton(
                 onClick = onDismissRequest,
-                modifier = Modifier.testTag("dialog_close_button")
+                modifier = Modifier
+                    .padding(end = 8.dp, bottom = 8.dp)
+                    .testTag("dialog_close_button")
             ) {
-                Text("Close", color = colors.accent, fontWeight = FontWeight.Bold)
+                Text(
+                    text = "Close",
+                    color = colors.accent,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 14.sp
+                )
             }
         },
         title = {
-            Text(
-                "Playback Settings",
-                color = colors.textPrimary,
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp
-            )
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "Playback Settings",
+                    color = colors.textPrimary,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 20.sp,
+                    letterSpacing = 0.5.sp
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Personalize response, timers, and acoustics",
+                    color = colors.textSecondary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Normal
+                )
+            }
         },
         containerColor = colors.surface,
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(28.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(16.dp)
+            .padding(12.dp)
             .testTag("playback_settings_dialog"),
         text = {
             Column(
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
             ) {
-                // Section 2: Shuffle & Repeat toggles
+                // Section 1: Shuffle & Repeat state controls (Horizontal symmetrical cards)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Shuffle card block
+                    // Modernized Shuffle card
                     Card(
                         modifier = Modifier
                             .weight(1f)
                             .clickable { onShuffleToggle() }
                             .testTag("dialog_shuffle_block"),
                         colors = CardDefaults.cardColors(
-                            containerColor = if (shuffleEnabled) colors.selectedBackground else colors.background
+                            containerColor = if (shuffleEnabled) colors.accent.copy(alpha = 0.12f) else colors.background
                         ),
-                        shape = RoundedCornerShape(12.dp)
+                        border = BorderStroke(
+                            width = if (shuffleEnabled) 1.5.dp else 1.dp,
+                            color = if (shuffleEnabled) colors.accent else colors.textSecondary.copy(alpha = 0.15f)
+                        ),
+                        shape = RoundedCornerShape(16.dp)
                     ) {
                         Column(
-                            modifier = Modifier.padding(12.dp),
+                            modifier = Modifier.padding(16.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Shuffle,
                                 contentDescription = "Shuffle mode",
                                 tint = if (shuffleEnabled) colors.accent else colors.textSecondary,
-                                modifier = Modifier.size(24.dp)
+                                modifier = Modifier.size(26.dp)
                             )
-                            Spacer(modifier = Modifier.height(4.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                "Shuffle",
+                                "Shuffle Queue",
                                 color = colors.textPrimary,
-                                fontSize = 12.sp,
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold
                             )
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                if (shuffleEnabled) "On" else "Off",
+                                if (shuffleEnabled) "Enabled" else "Standard",
                                 color = if (shuffleEnabled) colors.accent else colors.textSecondary,
-                                fontSize = 10.sp
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
                             )
                         }
                     }
 
-                    // Repeat card block
+                    // Modernized Repeat card
+                    val isRepeatActive = (repeatMode != com.example.ui.RepeatMode.NONE)
                     Card(
                         modifier = Modifier
                             .weight(1f)
                             .clickable { onRepeatToggle() }
                             .testTag("dialog_repeat_block"),
                         colors = CardDefaults.cardColors(
-                            containerColor = if (repeatMode != com.example.ui.RepeatMode.NONE) colors.selectedBackground else colors.background
+                            containerColor = if (isRepeatActive) colors.accent.copy(alpha = 0.12f) else colors.background
                         ),
-                        shape = RoundedCornerShape(12.dp)
+                        border = BorderStroke(
+                            width = if (isRepeatActive) 1.5.dp else 1.dp,
+                            color = if (isRepeatActive) colors.accent else colors.textSecondary.copy(alpha = 0.15f)
+                        ),
+                        shape = RoundedCornerShape(16.dp)
                     ) {
                         Column(
-                            modifier = Modifier.padding(12.dp),
+                            modifier = Modifier.padding(16.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Icon(
@@ -601,40 +920,76 @@ fun MorePlaybackOptionsDialog(
                                     else -> Icons.Default.Repeat
                                 },
                                 contentDescription = "Repeat mode",
-                                tint = if (repeatMode != com.example.ui.RepeatMode.NONE) colors.accent else colors.textSecondary,
-                                modifier = Modifier.size(24.dp)
+                                tint = if (isRepeatActive) colors.accent else colors.textSecondary,
+                                modifier = Modifier.size(26.dp)
                             )
-                            Spacer(modifier = Modifier.height(4.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                "Repeat",
+                                "Repeat Mode",
                                 color = colors.textPrimary,
-                                fontSize = 12.sp,
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold
                             )
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 when (repeatMode) {
-                                    com.example.ui.RepeatMode.ALL -> "All"
-                                    com.example.ui.RepeatMode.ONE -> "One"
+                                    com.example.ui.RepeatMode.ALL -> "Repeat All"
+                                    com.example.ui.RepeatMode.ONE -> "Repeat One"
                                     else -> "Off"
                                 },
-                                color = if (repeatMode != com.example.ui.RepeatMode.NONE) colors.accent else colors.textSecondary,
-                                fontSize = 10.sp
+                                color = if (isRepeatActive) colors.accent else colors.textSecondary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
                             )
                         }
                     }
                 }
 
-                // Section 3: Playback speed chips selector
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Speed, contentDescription = null, tint = colors.textSecondary, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Speed Selector", color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
+                // Section 2: High-Fi Playback Speed Selector (Beautiful glass pills container)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(colors.background)
+                        .padding(14.dp)
+                ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(colors.selectedBackground),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Speed,
+                                contentDescription = null,
+                                tint = colors.accent,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = "Playback Speed",
+                            color = colors.textPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
+                        Spacer(modifier = Modifier.weight(1f))
+                        Text(
+                            text = "${playbackSpeed}x",
+                            color = colors.accent,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f).forEach { speed ->
                             val isSpeedSelected = (playbackSpeed == speed)
@@ -642,8 +997,8 @@ fun MorePlaybackOptionsDialog(
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isSpeedSelected) colors.selectedBackground else colors.background)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (isSpeedSelected) colors.accent else colors.selectedBackground)
                                     .clickable { onSpeedChange(speed) }
                                     .padding(vertical = 8.dp)
                                     .testTag("dialog_speed_chip_$text"),
@@ -651,49 +1006,78 @@ fun MorePlaybackOptionsDialog(
                             ) {
                                 Text(
                                     text = text,
-                                    color = if (isSpeedSelected) colors.accent else colors.textPrimary,
+                                    color = if (isSpeedSelected) colors.background else colors.textPrimary,
                                     fontSize = 11.sp,
-                                    fontWeight = if (isSpeedSelected) FontWeight.Bold else FontWeight.SemiBold
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
                         }
                     }
                 }
 
-                // Section 4: Sleep Timer Customizer
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.HourglassEmpty, contentDescription = null, tint = colors.textSecondary, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
+                // Section 3: Sleep Timer Customizer (Beautiful glass pills container)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(colors.background)
+                        .padding(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(colors.selectedBackground),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.HourglassEmpty,
+                                contentDescription = null,
+                                tint = colors.accent,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = if (sleepTimeRemaining != null) {
-                                val m = sleepTimeRemaining / 60
-                                val s = sleepTimeRemaining % 60
-                                "Sleep Timer: Stop in ${String.format("%02d:%02d", m, s)}"
-                            } else {
-                                "Sleep Timer"
-                            },
-                            color = if (sleepTimeRemaining != null) colors.accent else colors.textPrimary,
+                            text = "Sleep Timer",
+                            color = colors.textPrimary,
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp
                         )
+                        Spacer(modifier = Modifier.weight(1f))
+                        if (sleepTimeRemaining != null) {
+                            val m = sleepTimeRemaining / 60
+                            val s = sleepTimeRemaining % 60
+                            Text(
+                                text = String.format("%02d:%02d left", m, s),
+                                color = colors.accent,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        }
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         listOf(null, 5, 15, 30, 60).forEach { mins ->
                             val text = if (mins == null) "Off" else "${mins}m"
-                            val isSelected = if (mins == null) sleepTimeRemaining == null else {
+                            val isSelected = if (mins == null) {
+                                sleepTimeRemaining == null
+                            } else {
                                 val currentMin = sleepTimeRemaining?.div(60)
                                 currentMin == mins
                             }
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isSelected) colors.selectedBackground else colors.background)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (isSelected) colors.accent else colors.selectedBackground)
                                     .clickable { onSleepTimerChange(mins) }
                                     .padding(vertical = 8.dp)
                                     .testTag("dialog_timer_chip_$text"),
@@ -701,48 +1085,58 @@ fun MorePlaybackOptionsDialog(
                             ) {
                                 Text(
                                     text = text,
-                                    color = if (isSelected) colors.accent else colors.textPrimary,
+                                    color = if (isSelected) colors.background else colors.textPrimary,
                                     fontSize = 11.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
                         }
                     }
                 }
 
-                // Section 5: Audio Effects Button Card
+                // Section 4: Audio Effects Equalizer Button card list tile
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { onAudioEffectsClick() }
                         .testTag("dialog_eq_block"),
                     colors = CardDefaults.cardColors(containerColor = colors.background),
-                    shape = RoundedCornerShape(12.dp)
+                    border = BorderStroke(1.dp, colors.textSecondary.copy(alpha = 0.12f)),
+                    shape = RoundedCornerShape(16.dp)
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(12.dp),
+                            .padding(16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.GraphicEq,
-                                contentDescription = "Audio effects",
-                                tint = colors.accent,
-                                modifier = Modifier.size(20.dp)
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(colors.accent.copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.GraphicEq,
+                                    contentDescription = "Audio effects",
+                                    tint = colors.accent,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Text(
-                                    "Audio Effects (Equalizer)",
+                                    text = "Acoustic Equalizer & FX",
                                     color = colors.textPrimary,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 13.sp
                                 )
+                                Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    "Fine-tune sound frequencies and presets",
+                                    text = "Fine-tune frequencies, presets & bass",
                                     color = colors.textSecondary,
                                     fontSize = 11.sp
                                 )

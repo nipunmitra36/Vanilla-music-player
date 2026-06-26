@@ -2,11 +2,17 @@ package com.example.ui.screens
 
 import kotlinx.coroutines.launch
 import androidx.compose.animation.*
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -29,6 +35,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.Playlist
+import com.example.data.PlaylistSongCrossRef
 import com.example.data.Song
 import com.example.ui.MusicViewModel
 import com.example.ui.ScreenState
@@ -50,11 +57,13 @@ fun HomeView(
     val sortMode by viewModel.sortMode.collectAsState()
     val activeSong by viewModel.activeSong.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
+    val hasPlayedAny by viewModel.hasPlayedAny.collectAsState()
     
     val coroutineScope = rememberCoroutineScope()
     
     val allSongs by viewModel.allSongs.collectAsState()
     val playlists by viewModel.allPlaylists.collectAsState()
+    val allCrossRefs by viewModel.allCrossRefs.collectAsState()
     val playQueue by viewModel.playQueue.collectAsState()
 
     var showPlaylistDialog by remember { mutableStateOf(false) }
@@ -158,7 +167,7 @@ fun HomeView(
             )
         },
         bottomBar = {
-            if (activeSong != null) {
+            if (activeSong != null && hasPlayedAny) {
                 Spacer(modifier = Modifier.height(96.dp).navigationBarsPadding())
             }
         }
@@ -168,12 +177,27 @@ fun HomeView(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
+            val context = androidx.compose.ui.platform.LocalContext.current
             // Sliding category navigation tabs
             TabSelector(
-                tabs = listOf("Songs", "Favorites", "Most Played", "Playlists", "Albums", "Artists", "Genres", "Folders"),
+                tabs = listOf("Songs", "Favorites", "Smart AI", "Most Played", "Playlists", "Albums", "Artists", "Genres", "Folders", "Media platform", "Statistics"),
                 selected = selectedTab,
                 colors = colors,
-                onSelected = { viewModel.selectTab(it) }
+                onSelected = { tab ->
+                    if (tab == "Media platform") {
+                        try {
+                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("vnd.youtube:"))
+                            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            context.startActivity(intent)
+                        } catch (e: Exception) {
+                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://www.youtube.com"))
+                            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            context.startActivity(intent)
+                        }
+                    } else {
+                        viewModel.selectTab(tab)
+                    }
+                }
             )
 
             // Content based on tab
@@ -186,6 +210,12 @@ fun HomeView(
             ) { targetTab ->
                 Box(modifier = Modifier.weight(1f)) {
                     when (targetTab) {
+                        "Smart AI" -> {
+                            SmartAITabContent(
+                                viewModel = viewModel,
+                                colors = colors
+                            )
+                        }
                         "Songs" -> {
                             SongsTabContent(
                                 viewModel = viewModel,
@@ -239,6 +269,8 @@ fun HomeView(
                         "Playlists" -> {
                             PlaylistsTabContent(
                                 playlists = playlists,
+                                songs = allSongs,
+                                crossRefs = allCrossRefs,
                                 colors = colors,
                                 onCreatePlaylistClick = { showCreatePlaylistDialog = true },
                                 onPlaylistClick = { playlist ->
@@ -252,7 +284,9 @@ fun HomeView(
                             AlbumsTabContent(
                                 songs = allSongs,
                                 colors = colors,
-                                onSongSelect = { viewModel.playSongFromList(it, allSongs) }
+                                onAlbumClick = { albumName ->
+                                    viewModel.selectAlbum(albumName)
+                                }
                             )
                         }
                         "Artists" -> {
@@ -274,6 +308,12 @@ fun HomeView(
                                 songs = allSongs,
                                 colors = colors,
                                 onSongSelect = { viewModel.playSongFromList(it, allSongs) }
+                            )
+                        }
+                        "Statistics" -> {
+                            StatisticsTabContent(
+                                viewModel = viewModel,
+                                colors = colors
                             )
                         }
                     }
@@ -424,7 +464,7 @@ fun HomeView(
                         Icon(
                             imageVector = if (song.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                             contentDescription = null,
-                            tint = if (song.isFavorite) Color.Red else colors.textSecondary
+                            tint = if (song.isFavorite) Color(0xFFFF1744) else colors.textSecondary
                         )
                         Spacer(modifier = Modifier.width(16.dp))
                         Text(
@@ -540,27 +580,97 @@ fun TabSelector(
     colors: ColorPalette,
     onSelected: (String) -> Unit
 ) {
+    val listState = rememberLazyListState()
+    
+    // Auto-scroll the selected tab to be visible when it is changed
+    LaunchedEffect(selected, tabs) {
+        val index = tabs.indexOf(selected)
+        if (index != -1) {
+            listState.animateScrollToItem(index)
+        }
+    }
+
     LazyRow(
+        state = listState,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 10.dp, horizontal = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+            .padding(vertical = 12.dp, horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         items(tabs) { tab ->
             val isSelected = (tab == selected)
-            Box(
+            
+            // Smooth animations for background color, content color, and borders
+            val backgroundColor by animateColorAsState(
+                targetValue = if (isSelected) colors.selectedBackground else Color.Transparent,
+                animationSpec = tween(durationMillis = 280),
+                label = "TabBgColor"
+            )
+            
+            val contentColor by animateColorAsState(
+                targetValue = if (isSelected) colors.accent else colors.textSecondary.copy(alpha = 0.85f),
+                animationSpec = tween(durationMillis = 280),
+                label = "TabContentColor"
+            )
+
+            // Dynamic scale/size for active and elegant response
+            val iconSizeMultiplier by animateDpAsState(
+                targetValue = if (isSelected) 18.dp else 16.dp,
+                animationSpec = spring(dampingRatio = 0.65f, stiffness = 300f),
+                label = "TabIconSize"
+            )
+
+            val borderAlpha by animateColorAsState(
+                targetValue = if (isSelected) colors.accent.copy(alpha = 0.4f) else Color.Transparent,
+                animationSpec = tween(durationMillis = 350),
+                label = "TabBorder"
+            )
+
+            Row(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(if (isSelected) colors.selectedBackground else Color.Transparent)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(backgroundColor)
+                    .border(
+                        width = 1.dp,
+                        color = borderAlpha,
+                        shape = RoundedCornerShape(24.dp)
+                    )
                     .clickable { onSelected(tab) }
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-                    .testTag("tab_$tab")
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
+                    .testTag("tab_$tab"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                // Determine premium icon matching the tab
+                val itemIcon = when (tab) {
+                    "Songs" -> Icons.Default.MusicNote
+                    "Favorites" -> Icons.Default.Favorite
+                    "Smart AI" -> Icons.Default.AutoAwesome
+                    "Most Played" -> Icons.Default.Whatshot
+                    "Playlists" -> Icons.Default.QueueMusic
+                    "Albums" -> Icons.Default.Album
+                    "Artists" -> Icons.Default.Person
+                    "Genres" -> Icons.Default.Category
+                    "Folders" -> Icons.Default.Folder
+                    "Media platform" -> Icons.Default.PlayArrow
+                    "Statistics" -> Icons.Default.BarChart
+                    else -> Icons.Default.MusicNote
+                }
+
+                Icon(
+                    imageVector = itemIcon,
+                    contentDescription = "$tab Tab Icon",
+                    tint = contentColor,
+                    modifier = Modifier.size(iconSizeMultiplier)
+                )
+                
                 Text(
                     text = tab,
-                    color = if (isSelected) colors.accent else colors.textSecondary,
-                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                    fontSize = 14.sp
+                    color = contentColor,
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                    fontSize = 13.sp,
+                    letterSpacing = 0.2.sp
                 )
             }
         }
@@ -616,58 +726,64 @@ fun SongsTabContent(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 6.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Sort,
-                    contentDescription = "Sort By",
-                    tint = colors.textSecondary,
-                    modifier = Modifier.size(16.dp)
-                )
+            Column {
                 Text(
-                    text = "Sort By (${songs.size})",
-                    color = colors.textSecondary,
-                    fontSize = 13.sp,
+                    text = "Library Tracks",
+                    color = colors.textPrimary,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.Bold
                 )
+                Text(
+                    text = "${songs.size} items cached",
+                    color = colors.textSecondary,
+                    fontSize = 11.sp
+                )
             }
 
-            // Dropdown Menu Anchor
             var expanded by remember { mutableStateOf(false) }
-            val currentLabel = when (sortMode) {
-                SortMode.A_Z -> "A–Z"
-                SortMode.Z_A -> "Z–A"
-                SortMode.DATE_MODIFIED_NEWEST -> "Newest First"
-                SortMode.DATE_MODIFIED_OLDEST -> "Oldest First"
-            }
 
             Box {
-                // Better trigger UI
-                Button(
-                    onClick = { expanded = true },
-                    colors = ButtonDefaults.buttonColors(containerColor = colors.selectedBackground),
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
-                    modifier = Modifier.height(36.dp).testTag("sort_dropdown_trigger")
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(colors.selectedBackground.copy(alpha = 0.5f))
+                        .border(
+                            width = 1.dp,
+                            color = colors.textSecondary.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        .clickable { expanded = true }
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                        .testTag("sort_dropdown_trigger"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    Icon(
+                        imageVector = Icons.Default.Sort,
+                        contentDescription = "Sort Options",
+                        tint = colors.accent,
+                        modifier = Modifier.size(16.dp)
+                    )
                     Text(
-                        text = currentLabel,
+                        text = when (sortMode) {
+                            SortMode.A_Z -> "A-Z"
+                            SortMode.Z_A -> "Z-A"
+                            SortMode.DATE_MODIFIED_NEWEST -> "Newest"
+                            SortMode.DATE_MODIFIED_OLDEST -> "Oldest"
+                        },
                         color = colors.accent,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
-                    Spacer(modifier = Modifier.width(4.dp))
                     Icon(
                         imageVector = Icons.Default.ArrowDropDown,
                         contentDescription = "Expand Sort Menu",
                         tint = colors.accent,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(16.dp)
                     )
                 }
 
@@ -675,29 +791,53 @@ fun SongsTabContent(
                     expanded = expanded,
                     onDismissRequest = { expanded = false },
                     modifier = Modifier
+                        .width(180.dp)
                         .background(colors.surface)
+                        .border(
+                            width = 1.dp,
+                            color = colors.textSecondary.copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(12.dp)
+                        )
                         .testTag("sort_dropdown_menu")
                 ) {
                     SortMode.entries.forEach { mode ->
+                        val isSelected = sortMode == mode
                         DropdownMenuItem(
                             text = {
-                                Text(
-                                    text = when (mode) {
-                                        SortMode.A_Z -> "A-Z"
-                                        SortMode.Z_A -> "Z-A"
-                                        SortMode.DATE_MODIFIED_NEWEST -> "Newest First"
-                                        SortMode.DATE_MODIFIED_OLDEST -> "Oldest First"
-                                    },
-                                    color = if (sortMode == mode) colors.accent else colors.textPrimary,
-                                    fontWeight = if (sortMode == mode) FontWeight.Bold else FontWeight.Medium,
-                                    fontSize = 14.sp
-                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = when (mode) {
+                                            SortMode.A_Z -> "A-Z Alphabetical"
+                                            SortMode.Z_A -> "Z-A Alphabetical"
+                                            SortMode.DATE_MODIFIED_NEWEST -> "Newest Added"
+                                            SortMode.DATE_MODIFIED_OLDEST -> "Oldest Added"
+                                        },
+                                        color = if (isSelected) colors.accent else colors.textPrimary,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        fontSize = 12.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    if (isSelected) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = "Selected",
+                                            tint = colors.accent,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
+                                }
                             },
                             onClick = {
                                 onSortModeSelect(mode)
                                 expanded = false
                             },
-                            modifier = Modifier.testTag("sort_item_${mode.name.lowercase()}")
+                            modifier = Modifier.testTag("sort_item_${mode.name.lowercase()}"),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                         )
                     }
                 }
@@ -1072,6 +1212,8 @@ fun FavoritesTabContent(
 @Composable
 fun PlaylistsTabContent(
     playlists: List<Playlist>,
+    songs: List<Song>,
+    crossRefs: List<PlaylistSongCrossRef>,
     colors: ColorPalette,
     onCreatePlaylistClick: () -> Unit,
     onPlaylistClick: (Playlist) -> Unit,
@@ -1123,53 +1265,111 @@ fun PlaylistsTabContent(
                 }
             }
         } else {
-            LazyColumn(
+            androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+                columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(2),
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                contentPadding = PaddingValues(bottom = 80.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                items(playlists) { playlist ->
+                items(playlists.size) { index ->
+                    val playlist = playlists[index]
+                    
+                    // Filter songs for this playlist
+                    val playlistSongIds = remember(crossRefs, playlist.id) {
+                        crossRefs.filter { it.playlistId == playlist.id }.map { it.songId }
+                    }
+                    val playlistSongs = remember(songs, playlistSongIds) {
+                        songs.filter { it.id in playlistSongIds }
+                    }
+                    val firstSong = playlistSongs.firstOrNull()
+                    val coverSource = if (firstSong != null) getFeaturedImageSource(firstSong) else null
+
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .aspectRatio(0.85f)
+                            .testTag("playlist_card_${playlist.id}")
                             .clickable { onPlaylistClick(playlist) },
                         colors = CardDefaults.cardColors(containerColor = colors.surface),
-                        shape = RoundedCornerShape(16.dp)
+                        shape = RoundedCornerShape(14.dp)
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(46.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(colors.selectedBackground),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(Icons.Default.QueueMusic, contentDescription = null, tint = colors.accent)
+                        Column {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f)
+                            ) {
+                                if (coverSource != null) {
+                                    AsyncImage(
+                                        model = coverSource,
+                                        contentDescription = "Playlist cover",
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    // Empty playlist artwork placeholder (Modern gradient with a sleek Music icon)
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(
+                                                brush = androidx.compose.ui.graphics.Brush.linearGradient(
+                                                    colors = listOf(colors.accent.copy(alpha = 0.8f), colors.surface)
+                                                )
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(48.dp)
+                                                .clip(RoundedCornerShape(24.dp))
+                                                .background(Color.White.copy(alpha = 0.2f)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.QueueMusic,
+                                                contentDescription = null,
+                                                tint = colors.accent,
+                                                modifier = Modifier.size(24.dp)
+                                            )
+                                        }
+                                    }
                                 }
-                                Spacer(modifier = Modifier.width(16.dp))
-                                Column {
+                            }
+                            
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = playlist.name,
                                         color = colors.textPrimary,
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = 15.sp
+                                        fontSize = 14.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
-                                        text = "Custom offline pool",
+                                        text = "${playlistSongs.size} ${if (playlistSongs.size == 1) "song" else "songs"}",
                                         color = colors.textSecondary,
                                         fontSize = 12.sp
                                     )
                                 }
-                            }
-
-                            IconButton(onClick = { onPlaylistDelete(playlist) }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = colors.textSecondary)
+                                IconButton(
+                                    onClick = { onPlaylistDelete(playlist) },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = "Delete",
+                                        tint = colors.textSecondary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -1251,7 +1451,7 @@ fun PlayQueueTabContent(
 fun AlbumsTabContent(
     songs: List<Song>,
     colors: ColorPalette,
-    onSongSelect: (Song) -> Unit
+    onAlbumClick: (String) -> Unit
 ) {
     val albums = remember(songs) {
         songs.groupBy { it.album }
@@ -1272,7 +1472,11 @@ fun AlbumsTabContent(
             val albumCover = getFeaturedImageSource(albumSongs.first())
             
             Card(
-                modifier = Modifier.fillMaxWidth().aspectRatio(0.85f).clickable { /* TODO: show songs of album */ },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(0.85f)
+                    .testTag("album_card_${album}")
+                    .clickable { onAlbumClick(album) },
                 colors = CardDefaults.cardColors(containerColor = colors.surface),
                 shape = RoundedCornerShape(14.dp)
             ) {
@@ -1303,48 +1507,136 @@ fun ArtistsTabContent(
         songs.groupBy { it.artist }
     }
 
+    var expandedArtist by remember { mutableStateOf<String?>(null) }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp, bottom = 80.dp)
+        contentPadding = PaddingValues(16.dp, bottom = 86.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        items(artists.keys.toList()) { artist ->
+        val artistList = artists.keys.toList()
+        items(artistList.size) { index ->
+            val artist = artistList[index]
             val artistSongs = artists[artist] ?: emptyList()
+            val representativeSong = artistSongs.firstOrNull()
+            val isExpanded = expandedArtist == artist
+
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 6.dp),
-                colors = CardDefaults.cardColors(containerColor = colors.surface),
-                shape = RoundedCornerShape(14.dp)
+                    .testTag("artist_card_${artist}")
+                    .clickable { expandedArtist = if (isExpanded) null else artist },
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isExpanded) colors.selectedBackground.copy(alpha = 0.5f) else colors.surface
+                ),
+                shape = RoundedCornerShape(20.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        // Circular Avatar with artwork or dynamic letter
                         Box(
                             modifier = Modifier
-                                .size(50.dp)
-                                .clip(RoundedCornerShape(25.dp))
-                                .background(colors.selectedBackground),
+                                .size(56.dp)
+                                .clip(RoundedCornerShape(28.dp))
+                                .background(colors.accent.copy(alpha = 0.15f)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.Person, contentDescription = null, tint = colors.accent, modifier = Modifier.size(28.dp))
+                            if (representativeSong != null) {
+                                AsyncImage(
+                                    model = getFeaturedImageSource(representativeSong),
+                                    contentDescription = "Artist photo placeholder",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.Person,
+                                    contentDescription = null,
+                                    tint = colors.accent,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
                         }
+
                         Spacer(modifier = Modifier.width(16.dp))
-                        Column {
-                            Text(artist, color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                            Text("Publisher & Artist", color = colors.textSecondary, fontSize = 12.sp)
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = artist,
+                                color = colors.textPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "${artistSongs.size} ${if (artistSongs.size == 1) "released track" else "released tracks"}",
+                                color = colors.textSecondary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
                         }
+
+                        Icon(
+                            imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = if (isExpanded) "Collapse" else "Expand",
+                            tint = colors.textSecondary
+                        )
                     }
-                    Spacer(modifier = Modifier.height(12.dp))
-                    artistSongs.forEach { song ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onSongSelect(song) }
-                                .padding(vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Default.MusicNote, contentDescription = null, tint = colors.textSecondary, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(song.title, color = colors.textPrimary, fontSize = 13.sp, maxLines = 1)
+
+                    if (isExpanded) {
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Divider(color = colors.textSecondary.copy(alpha = 0.15f))
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        artistSongs.forEach { song ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { onSongSelect(song) }
+                                    .padding(vertical = 10.dp, horizontal = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(safeParseColor(song.artworkColorHex).copy(alpha = 0.3f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.PlayArrow,
+                                        contentDescription = "Play",
+                                        tint = colors.accent,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = song.title,
+                                        color = colors.textPrimary,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 13.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = String.format("%d:%02d", song.durationSeconds / 60, song.durationSeconds % 60),
+                                        color = colors.textSecondary,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -1413,48 +1705,144 @@ fun GenresTabContent(
         }
     }
 
+    var expandedGenre by remember { mutableStateOf<String?>(null) }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp, bottom = 80.dp)
+        contentPadding = PaddingValues(16.dp, bottom = 86.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        items(genres.keys.toList()) { genre ->
+        val genreList = genres.keys.toList()
+        items(genreList.size) { index ->
+            val genre = genreList[index]
             val genreSongs = genres[genre] ?: emptyList()
+            val isExpanded = expandedGenre == genre
+
+            // Select specialized gradient based on genre
+            val gradientBrush = remember(genre) {
+                val startColor = when (genre) {
+                    "Chill / Ambient" -> Color(0xFF004D40) // Soft Forest Teal
+                    "Classical / Romance" -> Color(0xFF4A148C) // Wine Purple
+                    "Indie / Rock" -> Color(0xFF1A237E) // Deep Indigo
+                    "Cinematic Soundscapes" -> Color(0xFF263238) // Gunmetal Slate
+                    "Electronic / Dance" -> Color(0xFF3E2723) // Rich Umber
+                    else -> Color(0xFF0D47A1) // Cyan Blue
+                }
+                val endColor = when (genre) {
+                    "Chill / Ambient" -> Color(0xFF00897B)
+                    "Classical / Romance" -> Color(0xFF880E4F)
+                    "Indie / Rock" -> Color(0xFFE65100)
+                    "Cinematic Soundscapes" -> Color(0xFF455A64)
+                    "Electronic / Dance" -> Color(0xFFBF360C)
+                    else -> Color(0xFF00B0FF)
+                }
+                androidx.compose.ui.graphics.Brush.linearGradient(colors = listOf(startColor, endColor))
+            }
+
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 6.dp),
+                    .testTag("genre_card_${genre}")
+                    .clickable { expandedGenre = if (isExpanded) null else genre },
+                shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = colors.surface),
-                shape = RoundedCornerShape(14.dp)
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(50.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(colors.accent.copy(alpha = 0.2f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.MusicNote, contentDescription = null, tint = colors.accent, modifier = Modifier.size(28.dp))
-                        }
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column {
-                            Text(genre, color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                            Text("${genreSongs.size} songs", color = colors.textSecondary, fontSize = 13.sp)
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(12.dp))
-                    genreSongs.forEach { song ->
+                Column(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    // Header Area with linear gradient representing the vibe
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(brush = gradientBrush)
+                            .padding(18.dp)
+                    ) {
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onSongSelect(song) }
-                                .padding(vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = colors.accent, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(song.title, color = colors.textPrimary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Box(
+                                modifier = Modifier
+                                    .size(46.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color.White.copy(alpha = 0.2f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.MusicNote,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = genre,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 17.sp
+                                )
+                                Text(
+                                    text = "${genreSongs.size} tracks",
+                                    color = Color.White.copy(alpha = 0.8f),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                            Icon(
+                                imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = if (isExpanded) "Collapse" else "Expand",
+                                tint = Color.White
+                            )
+                        }
+                    }
+
+                    if (isExpanded) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp)
+                        ) {
+                            genreSongs.forEach { song ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable { onSongSelect(song) }
+                                        .padding(vertical = 10.dp, horizontal = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.PlayArrow,
+                                        contentDescription = "Play Track",
+                                        tint = colors.accent,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = song.title,
+                                            color = colors.textPrimary,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 14.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = song.artist,
+                                            color = colors.textSecondary,
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                    Text(
+                                        text = String.format("%d:%02d", song.durationSeconds / 60, song.durationSeconds % 60),
+                                        color = colors.textSecondary,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -1479,50 +1867,129 @@ fun FoldersTabContent(
         }
     }
 
+    var expandedFolder by remember { mutableStateOf<String?>(null) }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp, bottom = 80.dp)
+        contentPadding = PaddingValues(16.dp, bottom = 86.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        items(folders.keys.toList()) { folder ->
+        val folderList = folders.keys.toList()
+        items(folderList.size) { index ->
+            val folder = folderList[index]
             val folderSongs = folders[folder] ?: emptyList()
+            val isExpanded = expandedFolder == folder
+
+            // Simulated folder storage size calculation (e.g. ~3.8 MB per track)
+            val computedSize = remember(folderSongs) {
+                String.format("%.1f MB", folderSongs.size * 3.8)
+            }
+
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 6.dp),
+                    .testTag("folder_card_${folder}")
+                    .clickable { expandedFolder = if (isExpanded) null else folder },
                 colors = CardDefaults.cardColors(containerColor = colors.surface),
-                shape = RoundedCornerShape(14.dp)
+                shape = RoundedCornerShape(20.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                         Box(
                             modifier = Modifier
                                 .size(50.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(colors.accent.copy(alpha = 0.2f)),
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(colors.accent.copy(alpha = 0.12f)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.Folder, contentDescription = null, tint = colors.accent, modifier = Modifier.size(28.dp))
+                            Icon(
+                                imageVector = Icons.Default.Folder,
+                                contentDescription = "Folder",
+                                tint = colors.accent,
+                                modifier = Modifier.size(28.dp)
+                                )
                         }
+
                         Spacer(modifier = Modifier.width(16.dp))
-                        Column {
+
+                        Column(modifier = Modifier.weight(1f)) {
                             val folderName = folder.substringAfterLast("/")
-                            Text(folderName, color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                            Text(folder, color = colors.textSecondary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text("${folderSongs.size} songs", color = colors.textSecondary, fontSize = 12.sp)
+                            Text(
+                                text = folderName,
+                                color = colors.textPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = folder,
+                                color = colors.textSecondary.copy(alpha = 0.8f),
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(vertical = 1.dp)
+                            )
+                            Text(
+                                text = "${folderSongs.size} songs • $computedSize",
+                                color = colors.textSecondary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
                         }
+
+                        Icon(
+                            imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = if (isExpanded) "Collapse" else "Expand",
+                            tint = colors.textSecondary
+                        )
                     }
-                    Spacer(modifier = Modifier.height(12.dp))
-                    folderSongs.forEach { song ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onSongSelect(song) }
-                                .padding(vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = colors.accent, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(song.title, color = colors.textPrimary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+
+                    if (isExpanded) {
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Divider(color = colors.textSecondary.copy(alpha = 0.15f))
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        folderSongs.forEach { song ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { onSongSelect(song) }
+                                    .padding(vertical = 10.dp, horizontal = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.MusicNote,
+                                    contentDescription = "Audio track",
+                                    tint = colors.textSecondary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = song.title,
+                                        color = colors.textPrimary,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 13.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "${song.artist} • ${String.format("%d:%02d", song.durationSeconds / 60, song.durationSeconds % 60)}",
+                                        color = colors.textSecondary,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
                         }
                     }
                 }

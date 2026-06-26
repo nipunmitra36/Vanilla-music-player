@@ -20,6 +20,7 @@ class AudioEngine private constructor(private val context: android.content.Conte
     // MediaPlayer for actual music files
     private var mediaPlayer: android.media.MediaPlayer? = null
     private var isPlayingMedia = false
+    private var isSeeking = false
     private var mediaPlaybackJob: Job? = null
 
     companion object {
@@ -37,8 +38,51 @@ class AudioEngine private constructor(private val context: android.content.Conte
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying = _isPlaying.asStateFlow()
 
+    private val _isPreparing = MutableStateFlow(false)
+    val isPreparing = _isPreparing.asStateFlow()
+
+    private val _isBuffering = MutableStateFlow(false)
+    val isBuffering = _isBuffering.asStateFlow()
+
+    private val _currentBufferPercentage = MutableStateFlow(100)
+    val currentBufferPercentage = _currentBufferPercentage.asStateFlow()
+
+    private val _playbackError = MutableStateFlow<String?>(null)
+    val playbackError = _playbackError.asStateFlow()
+
+    private var isPrepared = false
+    private var playWhenReady = false
+
     private val _playbackSpeed = MutableStateFlow(1.0f)
     val playbackSpeed = _playbackSpeed.asStateFlow()
+
+    // Smart Features Configuration
+    var crossfadeEnabled = false
+    var crossfadeDuration = 3
+    var silenceSkipEnabled = false
+    
+    private var volumeBoostValue = 1.0f
+    private var loudnessEnhancer: android.media.audiofx.LoudnessEnhancer? = null
+
+    fun setVolumeBoost(boost: Float) {
+        volumeBoostValue = boost.coerceIn(1.0f, 2.0f)
+        applyVolumeBoost()
+    }
+
+    private fun applyVolumeBoost() {
+        val le = loudnessEnhancer ?: return
+        try {
+            // Amplifies up to +12dB or 1200 mB of hardware loudness gain based on volume target (up to 200%)
+            val gainDb = (volumeBoostValue - 1.0f) * 12f
+            val gainMb = (gainDb * 100).toInt()
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
+                le.setTargetGain(gainMb)
+                Log.d("AudioEngine", "Applied volume booster: $gainMb mB")
+            }
+        } catch (e: Exception) {
+            Log.e("AudioEngine", "Error setting target gain on LoudnessEnhancer", e)
+        }
+    }
 
     fun setPlaybackSpeed(speed: Float) {
         _playbackSpeed.value = speed
@@ -77,8 +121,17 @@ class AudioEngine private constructor(private val context: android.content.Conte
 
     private var currentEq = EqualizerState()
     private val lock = Any()
+    private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
 
     init {
+        try {
+            val wifiManager = context.applicationContext.getSystemService(android.content.Context.WIFI_SERVICE) as? android.net.wifi.WifiManager
+            if (wifiManager != null) {
+                wifiLock = wifiManager.createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF, "MusiclyWifiLock")
+            }
+        } catch (e: Exception) {
+            Log.e("AudioEngine", "Error creating WifiLock", e)
+        }
     }
 
     fun setSong(songId: String, preset: String, durationSecs: Int) {
@@ -86,6 +139,13 @@ class AudioEngine private constructor(private val context: android.content.Conte
             _isPlaying.value = false
             _trackDurationSeconds.value = durationSecs
             _currentPositionSeconds.value = 0
+            _playbackError.value = null
+            _isPreparing.value = true
+            _isBuffering.value = false
+            _currentBufferPercentage.value = 0
+            isPrepared = false
+            playWhenReady = false
+            isSeeking = false
 
             // Release any existing MediaPlayer completely
             try {
@@ -109,6 +169,7 @@ class AudioEngine private constructor(private val context: android.content.Conte
 
             try {
                 val mp = android.media.MediaPlayer().apply {
+                    setWakeMode(context, android.os.PowerManager.PARTIAL_WAKE_LOCK)
                     setAudioAttributes(
                         AudioAttributes.Builder()
                             .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -126,19 +187,120 @@ class AudioEngine private constructor(private val context: android.content.Conte
                         } else {
                             setDataSource(songId)
                         }
-                    } else if (songId.startsWith("content://") || songId.startsWith("file://")) {
-                        setDataSource(context, android.net.Uri.parse(songId))
+                    } else if (songId.startsWith("content://")) {
+                        try {
+                            val uri = android.net.Uri.parse(songId)
+                            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                                setDataSource(pfd.fileDescriptor)
+                            }
+                        } catch (e: Exception) {
+                            Log.e("AudioEngine", "Error loading content:// URI via FD, falling back", e)
+                            setDataSource(context, android.net.Uri.parse(songId))
+                        }
+                    } else if (songId.startsWith("file://") || java.io.File(songId).exists()) {
+                        try {
+                            val path = if (songId.startsWith("file://")) songId.substringAfter("file://") else songId
+                            val file = java.io.File(path)
+                            java.io.FileInputStream(file).use { fis ->
+                                setDataSource(fis.fd)
+                            }
+                        } catch (e: Exception) {
+                            Log.e("AudioEngine", "Error loading file via FD, falling back", e)
+                            setDataSource(songId)
+                        }
                     } else {
                         setDataSource(songId)
                     }
 
+                    setOnPreparedListener {
+                        synchronized(lock) {
+                            isPrepared = true
+                            _isPreparing.value = false
+                            _trackDurationSeconds.value = duration / 1000
+                            _playbackError.value = null
+
+                            try {
+                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                                    val speed = _playbackSpeed.value
+                                    if (speed != 1.0f) {
+                                        val params = playbackParams
+                                        params.speed = speed
+                                        playbackParams = params
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                Log.e("AudioEngine", "Error setting speed in onPrepared", e)
+                            }
+
+                            // Setup Volume booster (LoudnessEnhancer) on the new session ID
+                            try {
+                                loudnessEnhancer?.release()
+                            } catch (e: Exception) {}
+                            loudnessEnhancer = null
+
+                            try {
+                                val le = android.media.audiofx.LoudnessEnhancer(audioSessionId)
+                                le.enabled = true
+                                loudnessEnhancer = le
+                                applyVolumeBoost()
+                            } catch (e: Exception) {
+                                Log.e("AudioEngine", "LoudnessEnhancer allocation error", e)
+                            }
+
+                            // Handle fade-in initialization if crossfade is enabled
+                            if (crossfadeEnabled) {
+                                setVolume(0.0f, 0.0f)
+                            } else {
+                                setVolume(1.0f, 1.0f)
+                            }
+
+                            applyEqualizerSettings()
+
+                            if (playWhenReady) {
+                                play()
+                            }
+                        }
+                    }
+
+                    setOnBufferingUpdateListener { _, percent ->
+                        _currentBufferPercentage.value = percent
+                        if (percent >= 100) {
+                            _isBuffering.value = false
+                        }
+                    }
+
+                    setOnInfoListener { _, what, extra ->
+                        when (what) {
+                            android.media.MediaPlayer.MEDIA_INFO_BUFFERING_START -> {
+                                _isBuffering.value = true
+                            }
+                            android.media.MediaPlayer.MEDIA_INFO_BUFFERING_END -> {
+                                _isBuffering.value = false
+                            }
+                        }
+                        true
+                    }
+
                     setOnErrorListener { _, what, extra ->
                         Log.e("AudioEngine", "MediaPlayer error for $songId: what=$what, extra=$extra")
-                        val wasPlaying = _isPlaying.value
-                        _isPlaying.value = false
-                        if (wasPlaying) {
-                            scope.launch(Dispatchers.Main) {
-                                onSongCompletionListener?.invoke()
+                        synchronized(lock) {
+                            _isPreparing.value = false
+                            _isBuffering.value = false
+                            val errorMsg = when (extra) {
+                                android.media.MediaPlayer.MEDIA_ERROR_IO -> "Network connection timeout or IO error."
+                                android.media.MediaPlayer.MEDIA_ERROR_MALFORMED -> "Malformed streaming media stream."
+                                android.media.MediaPlayer.MEDIA_ERROR_UNSUPPORTED -> "Unsupported audio format."
+                                android.media.MediaPlayer.MEDIA_ERROR_TIMED_OUT -> "Streaming connection timed out."
+                                else -> "Broken or unavailable music stream link."
+                            }
+                            _playbackError.value = errorMsg
+                            val wasPlaying = _isPlaying.value
+                            _isPlaying.value = false
+                            isPrepared = false
+                            if (wasPlaying) {
+                                scope.launch(Dispatchers.Main) {
+                                    onSongCompletionListener?.invoke()
+                                }
                             }
                         }
                         true
@@ -155,36 +317,59 @@ class AudioEngine private constructor(private val context: android.content.Conte
                         }
                     }
 
-                    prepare()
-                    try {
-                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-                            val speed = _playbackSpeed.value
-                            if (speed != 1.0f) {
-                                val params = playbackParams
-                                params.speed = speed
-                                playbackParams = params
-                            }
+                    setOnSeekCompleteListener {
+                        synchronized(lock) {
+                            isSeeking = false
                         }
-                    } catch (e: Exception) {
-                        Log.e("AudioEngine", "Error setting speed in setSong", e)
+                    }
+
+                    // For network URLs, always prepareAsync to avoid NetworkOnMainThreadException or UI freezes!
+                    if (songId.startsWith("http://") || songId.startsWith("https://")) {
+                        prepareAsync()
+                    } else {
+                        // For local tracks, we can call traditional prepare() synchronously as it is extremely fast and low-latency
+                        try {
+                            prepare()
+                            isPrepared = true
+                            _isPreparing.value = false
+                            _trackDurationSeconds.value = duration / 1000
+                            applyEqualizerSettings()
+                        } catch (e: Throwable) {
+                            Log.e("AudioEngine", "Local prepare failed", e)
+                            prepareAsync()
+                        }
                     }
                 }
                 mediaPlayer = mp
                 isPlayingMedia = true
-                applyEqualizerSettings()
-                _trackDurationSeconds.value = mp.duration / 1000
             } catch (e: Throwable) {
-                Log.e("AudioEngine", "Error preparing MediaPlayer for $songId", e)
+                Log.e("AudioEngine", "Error initializing or Preparing MediaPlayer for $songId", e)
                 isPlayingMedia = false
+                _isPreparing.value = false
+                _isBuffering.value = false
+                _playbackError.value = "Failed to initialize audio player device: ${e.localizedMessage}"
             }
         }
     }
 
     fun play() {
-        if (_isPlaying.value) return
-        _isPlaying.value = true
+        if (_isPlaying.value && isPrepared) return
+
+        try {
+            if (wifiLock?.isHeld == false) {
+                wifiLock?.acquire()
+            }
+        } catch (e: Exception) {}
 
         if (isPlayingMedia) {
+            synchronized(lock) {
+                if (!isPrepared) {
+                    playWhenReady = true
+                    _isPlaying.value = true // seamlessly show loading/active state
+                    return
+                }
+            }
+            _isPlaying.value = true
             val mp = mediaPlayer
             if (mp != null) {
                 try {
@@ -198,16 +383,52 @@ class AudioEngine private constructor(private val context: android.content.Conte
                 mediaPlaybackJob = scope.launch {
                     while (isActive && _isPlaying.value) {
                         try {
-                            val currentPos = mp.currentPosition / 1000
-                            _currentPositionSeconds.value = currentPos
+                            if (!isSeeking) {
+                                val currentPosMs = mp.currentPosition
+                                val currentPosSec = currentPosMs / 1000
+                                _currentPositionSeconds.value = currentPosSec
+                            }
+                            val currentPosSec = _currentPositionSeconds.value
+                            val durationSec = _trackDurationSeconds.value
+
+                            // Dynamic fade controls if Crossfade is active
+                            if (crossfadeEnabled && durationSec > crossfadeDuration) {
+                                val elapsedSec = currentPosSec
+                                val remainingSec = durationSec - currentPosSec
+
+                                if (elapsedSec < crossfadeDuration) {
+                                    // Fade-in ramp: 0.0 to 1.0
+                                    val vol = elapsedSec.toFloat() / crossfadeDuration
+                                    mp.setVolume(vol, vol)
+                                } else if (remainingSec <= crossfadeDuration) {
+                                    // Fade-out ramp: 1.0 to 0.0
+                                    val vol = remainingSec.toFloat() / crossfadeDuration
+                                    mp.setVolume(vol.coerceIn(0.0f, 1.0f), vol.coerceIn(0.0f, 1.0f))
+                                } else {
+                                    // Mid-song: full volume status
+                                    mp.setVolume(1.0f, 1.0f)
+                                }
+                            }
+
+                            // Dynamic Silence Skip: if nearing end and silence skip active, skip silence Outro
+                            if (silenceSkipEnabled && durationSec > 10 && currentPosSec >= durationSec - 6) {
+                                Log.d("AudioEngine", "Silence skip triggered at $currentPosSec seconds")
+                                launch(Dispatchers.Main) {
+                                    _isPlaying.value = false
+                                    pause()
+                                    onSongCompletionListener?.invoke()
+                                }
+                                break
+                            }
                         } catch (tf: Throwable) {
                             // Suppress errors during transient states
                         }
-                        kotlinx.coroutines.delay(500)
+                        kotlinx.coroutines.delay(250)
                     }
                 }
             }
         } else {
+            _isPlaying.value = true
             // Mock playback for placeholder synthetic songs
             mediaPlaybackJob = scope.launch {
                 while (isActive && _isPlaying.value) {
@@ -277,8 +498,15 @@ class AudioEngine private constructor(private val context: android.content.Conte
 
     fun pause() {
         _isPlaying.value = false
+        playWhenReady = false
         mediaPlaybackJob?.cancel()
         mediaPlaybackJob = null
+
+        try {
+            if (wifiLock?.isHeld == true) {
+                wifiLock?.release()
+            }
+        } catch (e: Exception) {}
 
         if (isPlayingMedia) {
             try {
@@ -294,10 +522,12 @@ class AudioEngine private constructor(private val context: android.content.Conte
             val clamped = seconds.coerceIn(0, _trackDurationSeconds.value)
             if (isPlayingMedia) {
                 try {
+                    isSeeking = true
                     mediaPlayer?.seekTo(clamped * 1000)
                     _currentPositionSeconds.value = clamped
                 } catch (e: Throwable) {
                     Log.e("AudioEngine", "Error seeking MediaPlayer", e)
+                    isSeeking = false
                 }
             } else {
                 _currentPositionSeconds.value = clamped
@@ -352,10 +582,18 @@ class AudioEngine private constructor(private val context: android.content.Conte
         if (mediaPlayer == null) return
         try {
             if (equalizer == null) {
-                equalizer = Equalizer(0, mediaPlayer!!.audioSessionId)
+                try {
+                    equalizer = Equalizer(0, mediaPlayer!!.audioSessionId)
+                } catch (e: Exception) {
+                    Log.e("AudioEngine", "Error instantiating Equalizer", e)
+                }
             }
             if (bassBoost == null) {
-                bassBoost = BassBoost(0, mediaPlayer!!.audioSessionId)
+                try {
+                    bassBoost = BassBoost(0, mediaPlayer!!.audioSessionId)
+                } catch (e: Exception) {
+                    Log.e("AudioEngine", "Error instantiating BassBoost", e)
+                }
             }
 
             equalizer?.enabled = currentEq.isEnabled
@@ -389,6 +627,12 @@ class AudioEngine private constructor(private val context: android.content.Conte
 
     fun release() {
         pause()
+        try {
+            if (wifiLock?.isHeld == true) {
+                wifiLock?.release()
+            }
+        } catch (e: Exception) {}
+        wifiLock = null
         try {
             equalizer?.release()
             bassBoost?.release()

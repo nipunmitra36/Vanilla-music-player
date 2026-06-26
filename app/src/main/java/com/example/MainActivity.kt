@@ -7,9 +7,11 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Tune
@@ -35,6 +37,13 @@ import android.os.Build
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.zIndex
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.QueueMusic
+import kotlinx.coroutines.launch
+import coil.compose.AsyncImage
 
 class MainActivity : ComponentActivity() {
     private var mainViewModel: MusicViewModel? = null
@@ -58,6 +67,7 @@ class MainActivity : ComponentActivity() {
         if (intent.getBooleanExtra("OPEN_NOW_PLAYING", false)) {
             mainViewModel?.navigateTo(ScreenState.NOW_PLAYING)
         }
+        handleIntent(intent)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -73,6 +83,7 @@ class MainActivity : ComponentActivity() {
                     if (intent?.getBooleanExtra("OPEN_NOW_PLAYING", false) == true) {
                         viewModel.navigateTo(ScreenState.NOW_PLAYING)
                     }
+                    handleIntent(intent)
                 }
 
                 val selectedTab by viewModel.selectedTab.collectAsState()
@@ -81,6 +92,7 @@ class MainActivity : ComponentActivity() {
                 BackHandler(enabled = true) {
                     when (viewModel.currentScreen.value) {
                         ScreenState.PLAYLIST_DETAILS -> viewModel.navigateTo(ScreenState.HOME)
+                        ScreenState.ALBUM_DETAILS -> viewModel.navigateTo(ScreenState.HOME)
                         ScreenState.SETTINGS -> viewModel.navigateTo(ScreenState.HOME)
                         ScreenState.EQUALIZER -> viewModel.navigateTo(ScreenState.NOW_PLAYING)
                         ScreenState.NOW_PLAYING -> viewModel.navigateTo(ScreenState.HOME)
@@ -124,6 +136,20 @@ class MainActivity : ComponentActivity() {
                 val themeMode by viewModel.themeMode.collectAsState()
                 val setupGuideCompleted by viewModel.setupGuideCompleted.collectAsState()
 
+                // Dynamically update status bar color: in light theme (Serene Alabaster), the status bar will use light background with black text/icons
+                val context = androidx.compose.ui.platform.LocalContext.current
+                val window = (context as? android.app.Activity)?.window
+                if (window != null) {
+                    val isLight = themeMode == "Serene Alabaster"
+                    val statusBarColor = android.graphics.Color.TRANSPARENT
+                    SideEffect {
+                        window.statusBarColor = statusBarColor
+                        androidx.core.view.WindowCompat.getInsetsController(window, window.decorView).apply {
+                            isAppearanceLightStatusBars = isLight // Black icons/text in light theme, white in dark theme
+                        }
+                    }
+                }
+
                 // Resolve active design colors
                 val colors = when (themeMode) {
                     "Serene Alabaster" -> ColorPalette(
@@ -150,6 +176,14 @@ class MainActivity : ComponentActivity() {
                         textPrimary = Color(0xFFF3F4F6),
                         textSecondary = Color(0xFF9CA3AF)
                     )
+                    "Obsidian Crimson" -> ColorPalette(
+                        background = Color(0xFF0F0F0F),
+                        surface = Color(0xFF181818),
+                        selectedBackground = Color(0xFF282828),
+                        accent = Color(0xFFFF0033), // Obsidian Crimson Red accent
+                        textPrimary = Color(0xFFFAFAFA),
+                        textSecondary = Color(0xFFA3A3A3)
+                    )
                     else -> ColorPalette( // Dark Forest (default matching Screenshots)
                         background = Color(0xFF0C100D),
                         surface = Color(0xFF131914),
@@ -165,6 +199,72 @@ class MainActivity : ComponentActivity() {
                     color = colors.background
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
+                        // Modern In-App Notification Banner
+                        val inAppNotification by viewModel.inAppNotification.collectAsState()
+                        AnimatedVisibility(
+                            visible = inAppNotification != null,
+                            enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
+                            exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .statusBarsPadding()
+                                .padding(16.dp)
+                                .zIndex(99f)
+                        ) {
+                            inAppNotification?.let { msg ->
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .shadow(12.dp, RoundedCornerShape(20.dp)),
+                                    colors = CardDefaults.cardColors(containerColor = colors.surface),
+                                    shape = RoundedCornerShape(20.dp),
+                                    border = BorderStroke(1.5.dp, colors.accent)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(16.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(36.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(colors.accent.copy(alpha = 0.15f)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.QueueMusic,
+                                                contentDescription = null,
+                                                tint = colors.accent,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = "Library Updated",
+                                                color = colors.textPrimary,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 14.sp
+                                            )
+                                            Text(
+                                                text = msg,
+                                                color = colors.textSecondary,
+                                                fontSize = 12.sp
+                                            )
+                                        }
+                                        IconButton(onClick = { viewModel.dismissInAppNotification() }) {
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = "Dismiss",
+                                                tint = colors.textSecondary,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         // Modern screen crossfade animated transition
                         AnimatedContent(
                             targetState = currentScreen,
@@ -189,6 +289,9 @@ class MainActivity : ComponentActivity() {
                                 ScreenState.PLAYLIST_DETAILS -> {
                                     com.example.ui.screens.PlaylistDetailsView(viewModel = viewModel, colors = colors)
                                 }
+                                ScreenState.ALBUM_DETAILS -> {
+                                    com.example.ui.screens.AlbumDetailsView(viewModel = viewModel, colors = colors)
+                                }
                             }
                         }
 
@@ -196,8 +299,9 @@ class MainActivity : ComponentActivity() {
                         if (currentScreen != ScreenState.NOW_PLAYING) {
                             val activeSong by viewModel.activeSong.collectAsState()
                             val isPlaying by viewModel.isPlaying.collectAsState()
+                            val hasPlayedAny by viewModel.hasPlayedAny.collectAsState()
                             
-                            if (activeSong != null) {
+                            if (activeSong != null && hasPlayedAny) {
                                 MiniPlayerView(
                                     song = activeSong!!,
                                     isPlaying = isPlaying,
@@ -212,6 +316,122 @@ class MainActivity : ComponentActivity() {
                                         .padding(bottom = 16.dp, start = 16.dp, end = 16.dp)
                                 )
                             }
+                        }
+
+                        // YouTube Download Dialog
+                        val sharedYouTubeUrl by viewModel.sharedYouTubeUrl.collectAsState()
+                        if (sharedYouTubeUrl != null) {
+                            val fetchedMeta by viewModel.fetchedYouTubeMetadata.collectAsState()
+                            val isFetchingMetadata by viewModel.isFetchingMetadata.collectAsState()
+                            val isDownloading by viewModel.isDownloading.collectAsState()
+                            val downloadProgress by viewModel.downloadProgress.collectAsState()
+                            val downloadPhase by viewModel.downloadPhase.collectAsState()
+                            val downloadSongTitle by viewModel.downloadSongTitle.collectAsState()
+
+                            AlertDialog(
+                                onDismissRequest = { 
+                                    if (!isDownloading && !isFetchingMetadata) {
+                                        viewModel.setSharedYouTubeUrl(null)
+                                    }
+                                },
+                                title = { 
+                                    Text(
+                                        text = "Musicly Downloader",
+                                        color = colors.textPrimary,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 18.sp
+                                    )
+                                },
+                                containerColor = colors.surface,
+                                text = {
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        if (isFetchingMetadata) {
+                                            Column(
+                                                modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                CircularProgressIndicator(color = colors.accent, modifier = Modifier.size(36.dp))
+                                                Text(
+                                                    text = "Fetching YouTube video metadata...",
+                                                    color = colors.textSecondary,
+                                                    fontSize = 14.sp
+                                                )
+                                            }
+                                        } else {
+                                            Column(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                fetchedMeta?.artworkUrl?.let { uri ->
+                                                    AsyncImage(
+                                                        model = uri,
+                                                        contentDescription = "Video Thumbnail Preview",
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .height(140.dp)
+                                                            .clip(RoundedCornerShape(8.dp)),
+                                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                                    )
+                                                }
+                                                
+                                                Text(
+                                                    text = downloadSongTitle.ifEmpty { "Extracting audio stream..." },
+                                                    color = colors.textPrimary,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 16.sp,
+                                                    textAlign = TextAlign.Center,
+                                                    maxLines = 2
+                                                )
+                                                
+                                                Spacer(modifier = Modifier.height(8.dp))
+                                                
+                                                CircularProgressIndicator(
+                                                    color = colors.accent,
+                                                    modifier = Modifier.size(48.dp)
+                                                )
+                                                
+                                                Spacer(modifier = Modifier.height(8.dp))
+                                                
+                                                Text(
+                                                    text = downloadPhase,
+                                                    color = colors.textPrimary,
+                                                    fontWeight = FontWeight.Medium,
+                                                    fontSize = 15.sp,
+                                                    textAlign = TextAlign.Center
+                                                )
+                                                
+                                                LinearProgressIndicator(
+                                                    progress = { downloadProgress },
+                                                    color = colors.accent,
+                                                    trackColor = colors.accent.copy(alpha = 0.2f),
+                                                    modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp))
+                                                )
+                                                
+                                                Text(
+                                                    text = "${(downloadProgress * 100).toInt()}%",
+                                                    color = colors.textSecondary,
+                                                    fontSize = 12.sp
+                                                )
+                                            }
+                                        }
+                                    }
+                                },
+                                confirmButton = {},
+                                dismissButton = {
+                                    if (!isDownloading && !isFetchingMetadata) {
+                                        TextButton(
+                                            onClick = { viewModel.setSharedYouTubeUrl(null) }
+                                        ) {
+                                            Text("Cancel", color = colors.accent)
+                                        }
+                                    }
+                                }
+                            )
                         }
 
                         // Exit confirmation Dialog
@@ -252,6 +472,44 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    private fun extractYouTubeLink(text: String?): String? {
+        if (text == null) return null
+        val patterns = listOf(
+            "https://(?:www\\.)?youtube\\.com/watch\\?v=([a-zA-Z0-9_-]+)",
+            "https://youtu\\.be/([a-zA-Z0-9_-]+)",
+            "https://(?:www\\.)?youtube\\.com/shorts/([a-zA-Z0-9_-]+)"
+        )
+        for (p in patterns) {
+            val regex = Regex(p)
+            val match = regex.find(text)
+            if (match != null) {
+                return match.value
+            }
+        }
+        if (text.contains("youtube.com") || text.contains("youtu.be")) {
+            val urlRegex = Regex("https?://[^\\s]+")
+            return urlRegex.find(text)?.value ?: text
+        }
+        return null
+    }
+
+    private fun handleIntent(intent: android.content.Intent?) {
+        if (intent == null) return
+        val action = intent.action
+        val type = intent.type
+        if (android.content.Intent.ACTION_SEND == action && type != null) {
+            if ("text/plain" == type) {
+                val sharedText = intent.getStringExtra(android.content.Intent.EXTRA_TEXT)
+                if (sharedText != null) {
+                    val ytLink = extractYouTubeLink(sharedText)
+                    if (ytLink != null) {
+                        mainViewModel?.setSharedYouTubeUrl(ytLink)
+                    }
+                }
+            }
+        }
+    }
 }
 
 // Keep Greeting for GreetingScreenshotTest matching
@@ -266,6 +524,7 @@ fun SetupGuideDialog(
     onComplete: () -> Unit
 ) {
     var step by remember { mutableStateOf(1) }
+    val totalSteps = 4
 
     AlertDialog(
         onDismissRequest = {}, // Enforce walkthrough completion
@@ -274,8 +533,9 @@ fun SetupGuideDialog(
             Text(
                 text = when(step) {
                     1 -> "Welcome to Musicly"
-                    2 -> "Hi-Fi Equalizer Synth"
-                    else -> "Offline Playlists Pool"
+                    2 -> "Precision Equalizer Tuning"
+                    3 -> "Smart Crossfade & Transitions"
+                    else -> "Offline Playlists & Library"
                 },
                 color = colors.accent,
                 fontWeight = FontWeight.Bold,
@@ -288,32 +548,55 @@ fun SetupGuideDialog(
                     .fillMaxWidth()
                     .padding(top = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                // Elegant themed icon holder
                 Box(
                     modifier = Modifier
-                        .size(64.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(colors.accent.copy(alpha = 0.15f)),
+                        .size(72.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(colors.accent.copy(alpha = 0.12f))
+                        .border(1.5.dp, colors.accent.copy(alpha = 0.4f), RoundedCornerShape(20.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = when(step) {
                             1 -> Icons.Default.MusicNote
                             2 -> Icons.Default.Tune
-                            else -> Icons.Default.Info
+                            3 -> Icons.Default.AutoAwesome
+                            else -> Icons.Default.QueueMusic
                         },
                         contentDescription = null,
                         tint = colors.accent,
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier.size(36.dp)
                     )
+                }
+
+                // Premium Material 3 Carousel Dot Indicator
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    for (i in 1..totalSteps) {
+                        val isActive = i == step
+                        Box(
+                            modifier = Modifier
+                                .height(6.dp)
+                                .width(if (isActive) 18.dp else 6.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(
+                                    if (isActive) colors.accent else colors.textSecondary.copy(alpha = 0.3f)
+                                )
+                        )
+                    }
                 }
 
                 Text(
                     text = when(step) {
-                        1 -> "Your gorgeous, high-fidelity local offline player. Experience lag-free transitions, synchronized lyrics, and forest-green design aesthetics."
-                        2 -> "Adjust 60Hz bass thumps, warm 230Hz chords, 910Hz mid pads, 3600Hz details, and crisp 14000Hz sparkles. Sourced in real-time PCM synthesis."
-                        else -> "Organize, queue, and manage individual pools completely client-side without internet. Long-press any song item to favorite instantly."
+                        1 -> "Your ultimate local offline music companion. Experience a warm, natural design aesthetic combined with lightning-fast local performance, seamless transitions, and real-time scrolling lyrics."
+                        2 -> "Sculpt your sound with our built-in 5-band soft-equalizer and hardware bass booster. Customize your bass thumps (60Hz), warm acoustics (230Hz), mid vocals (910Hz), presence (3.6kHz), and high brilliance (14kHz)."
+                        3 -> "Eliminate silent gaps between songs automatically! Customize dynamic crossfade timings, toggle silence skipping to bypass empty outros, and view real-time synchronized karaoke-style lyrics."
+                        else -> "Build local playlists and organize your audio files in real-time. Everything is indexed and cached locally inside a robust SQLite database, ensuring completely offline playback without any internet."
                     },
                     color = colors.textPrimary,
                     fontSize = 13.sp,
@@ -325,7 +608,7 @@ fun SetupGuideDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    if (step < 3) {
+                    if (step < totalSteps) {
                         step++
                     } else {
                         onComplete()
@@ -334,7 +617,7 @@ fun SetupGuideDialog(
                 colors = ButtonDefaults.buttonColors(containerColor = colors.accent),
                 modifier = Modifier.testTag("welcome_next_confirm_button")
             ) {
-                Text(if (step < 3) "Next" else "Get Started", color = Color.White)
+                Text(if (step < totalSteps) "Next" else "Get Started", color = Color.White)
             }
         },
         dismissButton = {

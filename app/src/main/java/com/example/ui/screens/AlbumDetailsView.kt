@@ -14,7 +14,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
@@ -30,20 +29,23 @@ import com.example.ui.ScreenState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PlaylistDetailsView(
+fun AlbumDetailsView(
     viewModel: MusicViewModel,
     colors: ColorPalette
 ) {
-    val playlist by viewModel.selectedPlaylist.collectAsState()
-    val songs by viewModel.playlistSongs.collectAsState()
+    val albumName by viewModel.selectedAlbum.collectAsState()
+    val songs by viewModel.albumSongs.collectAsState()
     val allPlaylists by viewModel.allPlaylists.collectAsState()
 
     var showAddPlaylistDialogForSong by remember { mutableStateOf<Song?>(null) }
     var showCreatePlaylistDialogInsideAdd by remember { mutableStateOf<Song?>(null) }
     var newPlaylistNameInsideAdd by remember { mutableStateOf("") }
 
-    // Representative cover
-    val playlistCover = remember(songs) {
+    // Determine representative artist and representative cover
+    val representativeArtist = remember(songs) {
+        songs.firstOrNull()?.artist ?: "Unknown Artist"
+    }
+    val representativeCover = remember(songs) {
         songs.firstOrNull()?.let { getFeaturedImageSource(it) }
     }
 
@@ -54,7 +56,7 @@ fun PlaylistDetailsView(
             TopAppBar(
                 title = {
                     Text(
-                        text = playlist?.name ?: "Playlist Details",
+                        text = albumName ?: "Album Tracks",
                         color = colors.textPrimary,
                         fontWeight = FontWeight.Bold,
                         fontSize = 20.sp,
@@ -85,82 +87,68 @@ fun PlaylistDetailsView(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            if (playlist != null) {
-                // Header card with blurred/gradient atmosphere background
-                Box(
+            if (!albumName.isNullOrBlank()) {
+                // Large styled Header card with Album Art or placeholder
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(
-                            brush = Brush.linearGradient(
-                                colors = listOf(
-                                    colors.accent.copy(alpha = 0.25f),
-                                    colors.selectedBackground.copy(alpha = 0.15f)
-                                )
-                            )
-                        )
-                        .padding(20.dp)
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
+                    Box(
+                        modifier = Modifier
+                            .size(110.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(colors.selectedBackground)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(110.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(colors.selectedBackground)
-                        ) {
-                            if (playlistCover != null) {
-                                AsyncImage(
-                                    model = playlistCover,
-                                    contentDescription = "Playlist cover",
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop
+                        if (representativeCover != null) {
+                            AsyncImage(
+                                model = representativeCover,
+                                contentDescription = "Album cover",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier.fillMaxSize().background(colors.accent.copy(alpha = 0.2f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = albumName?.take(1)?.uppercase() ?: "A",
+                                    color = colors.accent,
+                                    fontSize = 32.sp,
+                                    fontWeight = FontWeight.Bold
                                 )
-                            } else {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(colors.accent.copy(alpha = 0.2f)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.QueueMusic,
-                                        contentDescription = null,
-                                        tint = colors.accent,
-                                        modifier = Modifier.size(48.dp)
-                                    )
-                                }
                             }
                         }
+                    }
 
-                        Spacer(modifier = Modifier.width(20.dp))
+                    Spacer(modifier = Modifier.width(20.dp))
 
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = playlist?.name ?: "",
-                                color = colors.textPrimary,
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Custom offline pool",
-                                color = colors.textSecondary,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "${songs.size} ${if (songs.size == 1) "track" else "tracks"}",
-                                color = colors.textSecondary.copy(alpha = 0.8f),
-                                fontSize = 12.sp
-                            )
-                        }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = albumName ?: "",
+                            color = colors.textPrimary,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Album • $representativeArtist",
+                            color = colors.textSecondary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "${songs.size} ${if (songs.size == 1) "track" else "tracks"}",
+                            color = colors.textSecondary.copy(alpha = 0.8f),
+                            fontSize = 12.sp
+                        )
                     }
                 }
 
@@ -168,23 +156,15 @@ fun PlaylistDetailsView(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 20.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalArrangement = Arrangement.End
                 ) {
-                    Text(
-                        text = "Tracks",
-                        color = colors.textPrimary,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-
                     if (songs.isNotEmpty()) {
                         Button(
                             onClick = { viewModel.playSongFromList(songs.first(), songs) },
                             colors = ButtonDefaults.buttonColors(containerColor = colors.accent),
                             shape = RoundedCornerShape(24.dp),
                             contentPadding = PaddingValues(horizontal = 24.dp, vertical = 10.dp),
-                            modifier = Modifier.testTag("play_playlist_all_button")
+                            modifier = Modifier.testTag("play_album_all_button")
                         ) {
                             Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White)
                             Spacer(modifier = Modifier.width(8.dp))
@@ -195,7 +175,7 @@ fun PlaylistDetailsView(
 
                 if (songs.isEmpty()) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("No songs in this playlist.", color = colors.textSecondary)
+                        Text("No songs in this album.", color = colors.textSecondary)
                     }
                 } else {
                     LazyColumn(
@@ -206,7 +186,7 @@ fun PlaylistDetailsView(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .testTag("playlist_song_row_${song.id}")
+                                    .testTag("album_song_row_${song.id}")
                                     .clip(RoundedCornerShape(14.dp))
                                     .clickable { viewModel.playSongFromList(song, songs) }
                                     .padding(vertical = 10.dp, horizontal = 12.dp),
@@ -247,13 +227,13 @@ fun PlaylistDetailsView(
                                     )
                                 }
 
-                                // 3-dot option menu
+                                // 3-dot options menu for Album song row
                                 Box {
                                     var showDropdownMenu by remember { mutableStateOf(false) }
 
                                     IconButton(
                                         onClick = { showDropdownMenu = true },
-                                        modifier = Modifier.testTag("playlist_song_options_${song.id}")
+                                        modifier = Modifier.testTag("album_song_options_${song.id}")
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.MoreVert,
@@ -269,7 +249,7 @@ fun PlaylistDetailsView(
                                         DropdownMenuItem(
                                             text = { Text("Play Now") },
                                             onClick = {
-                                                viewModel.playSongFromList(song, listOf(song))
+                                                viewModel.playSongFromList(song, songs)
                                                 showDropdownMenu = false
                                             },
                                             leadingIcon = {
@@ -320,21 +300,6 @@ fun PlaylistDetailsView(
                                                 Icon(Icons.Default.PlaylistAdd, contentDescription = null)
                                             }
                                         )
-                                        Divider(modifier = Modifier.padding(vertical = 4.dp))
-                                        DropdownMenuItem(
-                                            text = { Text("Remove from Playlist", color = Color.Red) },
-                                            onClick = {
-                                                viewModel.removeSongFromPlaylist(playlist!!.id, song.id)
-                                                showDropdownMenu = false
-                                            },
-                                            leadingIcon = {
-                                                Icon(
-                                                    imageVector = Icons.Default.Delete,
-                                                    contentDescription = null,
-                                                    tint = Color.Red
-                                                )
-                                            }
-                                        )
                                     }
                                 }
                             }
@@ -343,7 +308,7 @@ fun PlaylistDetailsView(
                 }
             } else {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Playlist not found.", color = colors.textSecondary)
+                    Text("Album not found.", color = colors.textSecondary)
                 }
             }
         }
@@ -468,7 +433,6 @@ fun PlaylistDetailsView(
                     onClick = {
                         if (newPlaylistNameInsideAdd.isNotBlank()) {
                             viewModel.createPlaylist(newPlaylistNameInsideAdd)
-                            // Clean up and refresh
                             newPlaylistNameInsideAdd = ""
                             showCreatePlaylistDialogInsideAdd = null
                         }
