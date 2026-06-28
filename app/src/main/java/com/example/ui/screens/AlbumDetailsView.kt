@@ -180,22 +180,25 @@ fun AlbumDetailsView(
                 } else {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                     ) {
                         items(songs, key = { it.id }) { song ->
+                            val isActive = viewModel.activeSong.collectAsState().value?.id == song.id
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .padding(vertical = 2.dp)
                                     .testTag("album_song_row_${song.id}")
-                                    .clip(RoundedCornerShape(14.dp))
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isActive) colors.accent.copy(alpha = 0.12f) else Color.Transparent)
                                     .clickable { viewModel.playSongFromList(song, songs) }
-                                    .padding(vertical = 10.dp, horizontal = 12.dp),
+                                    .padding(horizontal = 8.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(48.dp)
-                                        .clip(RoundedCornerShape(10.dp))
+                                        .size(46.dp)
+                                        .clip(RoundedCornerShape(8.dp))
                                         .background(safeParseColor(song.artworkColorHex))
                                 ) {
                                     val artSource = getFeaturedImageSource(song)
@@ -207,21 +210,33 @@ fun AlbumDetailsView(
                                     )
                                 }
 
-                                Spacer(modifier = Modifier.width(16.dp))
+                                Spacer(modifier = Modifier.width(12.dp))
 
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = song.title,
-                                        color = colors.textPrimary,
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        if (isActive) {
+                                            val isPlayingFlowState by viewModel.isPlaying.collectAsState()
+                                            Icon(
+                                                imageVector = if (isPlayingFlowState) Icons.Default.VolumeUp else Icons.Default.VolumeMute,
+                                                contentDescription = "Playing state",
+                                                tint = colors.accent,
+                                                modifier = Modifier.size(15.dp).padding(end = 4.dp)
+                                            )
+                                        }
+                                        Text(
+                                            text = song.title,
+                                            color = if (isActive) colors.accent else colors.textPrimary,
+                                            fontSize = 14.5.sp,
+                                            fontWeight = if (isActive) FontWeight.Bold else FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(1.dp))
                                     Text(
                                         text = "${song.artist} • ${String.format("%d:%02d", song.durationSeconds / 60, song.durationSeconds % 60)}",
                                         color = colors.textSecondary,
-                                        fontSize = 13.sp,
+                                        fontSize = 12.5.sp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )

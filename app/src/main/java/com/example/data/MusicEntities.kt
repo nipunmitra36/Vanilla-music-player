@@ -46,5 +46,7 @@ data class EqualizerState(
     val band3600Hz: Float = 0f,
     val band14000Hz: Float = 0f,
     val bassBoostEnabled: Boolean = false,
-    val bassBoostStrength: Float = 0.5f
+    val bassBoostStrength: Float = 0.5f,
+    val virtualizerEnabled: Boolean = false,
+    val virtualizerStrength: Float = 0.5f
 )

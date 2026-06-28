@@ -1,6 +1,8 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -14,14 +16,19 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.style.TextOverflow
 import com.example.ui.MusicViewModel
+import coil.compose.AsyncImage
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -53,6 +60,75 @@ fun SmartAITabContent(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // --- NEW HERO SECTION: FEATURED AI BANNER ---
+        item {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(160.dp)
+                    .testTag("ai_featured_header_card"),
+                colors = CardDefaults.cardColors(containerColor = colors.surface)
+            ) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    Image(
+                        painter = painterResource(id = com.example.R.drawable.img_ai_featured_banner_1782655556426),
+                        contentDescription = "AI Featured Banner",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                    // Elegant dark gradient scrim overlay for text contrast
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color.Transparent,
+                                        Color.Black.copy(alpha = 0.85f)
+                                    )
+                                )
+                            )
+                    )
+                    // Content overlay
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(colors.accent.copy(alpha = 0.2f))
+                                .border(1.dp, colors.accent.copy(alpha = 0.8f), RoundedCornerShape(6.dp))
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "Acoustic Intelligence",
+                                color = colors.accent,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.5.sp
+                            )
+                        }
+                        Text(
+                            text = "Next-Gen Intelligent Audio",
+                            color = Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Acoustic modeling & vector mix synthesizers active",
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Light
+                        )
+                    }
+                }
+            }
+        }
+
         // --- SECTION 1: AI MOOD ENGINE ---
         item {
             Card(
@@ -62,7 +138,7 @@ fun SmartAITabContent(
             ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(14.dp) // Optimized gap inside the card
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -91,91 +167,111 @@ fun SmartAITabContent(
                     )
 
                     // Presets Wrap FlowRow
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        presetMoods.forEach { mood ->
-                            val isSelected = customMoodText.equals(mood, ignoreCase = true)
-                            FilterChip(
-                                selected = isSelected,
-                                onClick = { 
-                                    customMoodText = mood
-                                    viewModel.generateMoodPlaylist(mood)
-                                },
-                                label = { Text(mood, fontSize = 12.sp, fontWeight = FontWeight.Medium) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    labelColor = if (isSelected) colors.background else colors.textPrimary,
-                                    selectedContainerColor = colors.accent,
-                                    selectedLabelColor = colors.background,
-                                    containerColor = colors.background
-                                ),
-                                border = FilterChipDefaults.filterChipBorder(
-                                    borderColor = colors.textSecondary.copy(alpha = 0.2f),
-                                    selectedBorderColor = colors.accent,
-                                    enabled = true,
-                                    selected = isSelected
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = "PRESET CATEGORIES",
+                            color = colors.accent,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.5.sp
+                        )
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            presetMoods.forEach { mood ->
+                                val isSelected = customMoodText.equals(mood, ignoreCase = true)
+                                FilterChip(
+                                    selected = isSelected,
+                                    onClick = { 
+                                        customMoodText = mood
+                                        viewModel.generateMoodPlaylist(mood)
+                                    },
+                                    label = { Text(mood, fontSize = 12.sp, fontWeight = FontWeight.Medium) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        labelColor = if (isSelected) colors.background else colors.textPrimary,
+                                        selectedContainerColor = colors.accent,
+                                        selectedLabelColor = colors.background,
+                                        containerColor = colors.background
+                                    ),
+                                    border = FilterChipDefaults.filterChipBorder(
+                                        borderColor = colors.textSecondary.copy(alpha = 0.2f),
+                                        selectedBorderColor = colors.accent,
+                                        enabled = true,
+                                        selected = isSelected
+                                    )
                                 )
-                            )
+                            }
                         }
                     }
 
-                    // Text Field for typing custom vibe
-                    OutlinedTextField(
-                        value = customMoodText,
-                        onValueChange = { customMoodText = it },
-                        placeholder = { Text("E.g., Bollywood Hits or Rainy Evening", fontSize = 13.sp, color = colors.textSecondary) },
-                        singleLine = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("ai_mood_text_input"),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = colors.textPrimary,
-                            unfocusedTextColor = colors.textPrimary,
-                            focusedBorderColor = colors.accent,
-                            unfocusedBorderColor = colors.textSecondary.copy(alpha = 0.3f),
-                            focusedContainerColor = colors.background,
-                            unfocusedContainerColor = colors.background
-                        ),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(onSearch = {
-                            if (customMoodText.isNotBlank()) {
-                                viewModel.generateMoodPlaylist(customMoodText)
-                            }
-                        }),
-                        trailingIcon = {
-                            if (customMoodText.isNotBlank()) {
-                                IconButton(onClick = { customMoodText = "" }) {
-                                    Icon(Icons.Default.Clear, contentDescription = "Clear text", tint = colors.textSecondary)
+                    // Unified input and search button group
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            text = "CUSTOM MOOD DESCRIBER",
+                            color = colors.accent,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.5.sp
+                        )
+                        
+                        // Text Field for typing custom vibe
+                        OutlinedTextField(
+                            value = customMoodText,
+                            onValueChange = { customMoodText = it },
+                            placeholder = { Text("E.g., Bollywood Hits or Rainy Evening", fontSize = 13.sp, color = colors.textSecondary) },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("ai_mood_text_input"),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = colors.textPrimary,
+                                unfocusedTextColor = colors.textPrimary,
+                                focusedBorderColor = colors.accent,
+                                unfocusedBorderColor = colors.textSecondary.copy(alpha = 0.3f),
+                                focusedContainerColor = colors.background,
+                                unfocusedContainerColor = colors.background
+                             ),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(onSearch = {
+                                if (customMoodText.isNotBlank()) {
+                                    viewModel.generateMoodPlaylist(customMoodText)
+                                }
+                            }),
+                            trailingIcon = {
+                                if (customMoodText.isNotBlank()) {
+                                    IconButton(onClick = { customMoodText = "" }) {
+                                        Icon(Icons.Default.Clear, contentDescription = "Clear text", tint = colors.textSecondary)
+                                    }
                                 }
                             }
-                        }
-                    )
+                        )
 
-                    Button(
-                        onClick = { 
-                            if (customMoodText.isNotBlank()) {
-                                viewModel.generateMoodPlaylist(customMoodText)
-                            }
-                        },
-                        enabled = customMoodText.isNotBlank() && aiStatus == null,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = colors.accent,
-                            contentColor = colors.background,
-                            disabledContainerColor = colors.accent.copy(alpha = 0.3f),
-                            disabledContentColor = colors.background.copy(alpha = 0.6f)
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(46.dp)
-                            .testTag("ai_mood_generate_button"),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Create Smart Mood Mix", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Button(
+                            onClick = { 
+                                if (customMoodText.isNotBlank()) {
+                                    viewModel.generateMoodPlaylist(customMoodText)
+                                }
+                            },
+                            enabled = customMoodText.isNotBlank() && aiStatus == null,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = colors.accent,
+                                contentColor = colors.background,
+                                disabledContainerColor = colors.accent.copy(alpha = 0.3f),
+                                disabledContentColor = colors.background.copy(alpha = 0.6f)
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(46.dp)
+                                .testTag("ai_mood_generate_button"),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Create Smart Mood Mix", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        }
                     }
 
                     // Progress Status indicator
@@ -203,6 +299,195 @@ fun SmartAITabContent(
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Medium
                                 )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- SECTION 1.5: AI Personalized recommendations ---
+        item {
+            val recSongs by viewModel.aiRecommendedSongs.collectAsState()
+            val tasteAnalysis by viewModel.aiTasteAnalysis.collectAsState()
+
+            Card(
+                colors = CardDefaults.cardColors(containerColor = colors.surface),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth().testTag("ai_recommendations_card")
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = "Personalized AI recommendations",
+                                tint = colors.accent,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Text(
+                                text = "Personalized AI recommendations",
+                                color = colors.textPrimary,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        IconButton(
+                            onClick = { viewModel.refreshAIRecommendations() },
+                            modifier = Modifier.size(32.dp).testTag("refresh_ai_recs_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Refresh",
+                                tint = colors.accent,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    // Acoustic Taste Analysis Badge
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = colors.background),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "Acoustic Taste Analysis",
+                                color = colors.accent,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.5.sp
+                            )
+                            Text(
+                                text = tasteAnalysis,
+                                color = colors.textPrimary,
+                                fontSize = 13.sp,
+                                lineHeight = 18.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+
+                    if (recSongs.isNotEmpty()) {
+                        Text(
+                            text = "Based on your library & play history, you might like:",
+                            color = colors.textSecondary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            recSongs.forEach { song ->
+                                val isSongActive = viewModel.activeSong.collectAsState().value?.id == song.id
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(if (isSongActive) colors.selectedBackground else colors.background)
+                                        .clickable {
+                                            viewModel.setSong(song, autoplay = true)
+                                        }
+                                        .padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // High-Fidelity Artwork using Coil AsyncImage
+                                    val artworkSource = getFeaturedImageSource(song)
+                                    Box(
+                                        modifier = Modifier
+                                            .size(44.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(safeParseColor(song.artworkColorHex).copy(alpha = 0.2f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        AsyncImage(
+                                            model = artworkSource,
+                                            contentDescription = null,
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                        
+                                        // Semitransparent play/pause overlay for active/inactive state visual guidance
+                                        val isPlayingFlowState by viewModel.isPlaying.collectAsState()
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(if (isSongActive) Color.Black.copy(alpha = 0.4f) else Color.Transparent),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (isSongActive) {
+                                                Icon(
+                                                    imageVector = if (isPlayingFlowState) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                                    contentDescription = null,
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            } else {
+                                                // Subtle hover play indicator
+                                                Icon(
+                                                    imageVector = Icons.Default.PlayArrow,
+                                                    contentDescription = null,
+                                                    tint = Color.White.copy(alpha = 0.15f),
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.width(12.dp))
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = song.title,
+                                            color = if (isSongActive) colors.accent else colors.textPrimary,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = song.artist,
+                                            color = colors.textSecondary,
+                                            fontSize = 12.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.width(8.dp))
+
+                                    // Signature badge
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(colors.surface)
+                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Text(
+                                            text = song.audioPreset.uppercase(),
+                                            color = colors.accent,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

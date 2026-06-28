@@ -1,9 +1,8 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.*
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.*
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -13,6 +12,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.*
@@ -331,8 +338,8 @@ fun NowPlayingView(
 
                 Spacer(modifier = Modifier.height(28.dp))
 
-                // High-fidelity Progress Slider
-                Slider(
+                // High-fidelity Progress Squiggle Slider
+                SquiggleSlider(
                     value = dragProgress ?: progress,
                     onValueChange = { newValue ->
                         dragProgress = newValue
@@ -342,11 +349,8 @@ fun NowPlayingView(
                         viewModel.seekTo(targetSeconds)
                         dragProgress = null
                     },
-                    colors = SliderDefaults.colors(
-                        thumbColor = colors.accent,
-                        activeTrackColor = colors.accent,
-                        inactiveTrackColor = colors.textSecondary.copy(alpha = 0.3f)
-                    ),
+                    isPlaying = isPlaying,
+                    colors = colors,
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("playback_progress_slider")
@@ -627,25 +631,62 @@ fun NowPlayingView(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .verticalScroll(lyricsScrollState),
-                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(24.dp), // Generous spacing for modern typography
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Spacer(modifier = Modifier.height(100.dp))
+                            Spacer(modifier = Modifier.height(120.dp))
                             lrcLines.forEachIndexed { idx, item ->
                                 val isActive = (idx == activeLineIndex)
-                                Text(
-                                    text = item.text,
-                                    color = if (isActive) colors.accent else colors.textPrimary.copy(alpha = 0.5f),
-                                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
-                                    fontSize = if (isActive) 22.sp else 16.sp,
-                                    textAlign = TextAlign.Center,
+                                
+                                // Animated text colors
+                                val lyricColor by animateColorAsState(
+                                    targetValue = if (isActive) colors.accent else colors.textPrimary.copy(alpha = 0.45f),
+                                    animationSpec = tween(400, easing = EaseInOutCubic),
+                                    label = "LyricColor"
+                                )
+                                
+                                // Animated scale & opacity for dynamic perspective depth
+                                val scale by animateFloatAsState(
+                                    targetValue = if (isActive) 1.06f else 0.94f,
+                                    animationSpec = spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMedium),
+                                    label = "LyricScale"
+                                )
+                                
+                                val opacity by animateFloatAsState(
+                                    targetValue = if (isActive) 1f else 0.45f,
+                                    animationSpec = tween(400),
+                                    label = "LyricOpacity"
+                                )
+
+                                Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clickable { viewModel.seekTo(item.timeSecs) }
-                                        .padding(vertical = 4.dp)
-                                )
+                                        .graphicsLayer {
+                                            scaleX = scale
+                                            scaleY = scale
+                                            alpha = opacity
+                                        }
+                                        .clickable(
+                                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                            indication = null // remove distracting default ripple
+                                        ) {
+                                            viewModel.seekTo(item.timeSecs)
+                                        }
+                                        .padding(horizontal = 24.dp, vertical = 6.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = item.text,
+                                        color = lyricColor,
+                                        fontWeight = if (isActive) FontWeight.ExtraBold else FontWeight.Bold,
+                                        fontSize = if (isActive) 23.sp else 17.sp,
+                                        textAlign = TextAlign.Center,
+                                        lineHeight = if (isActive) 32.sp else 26.sp,
+                                        letterSpacing = if (isActive) 0.5.sp else 0.sp
+                                    )
+                                }
                             }
-                            Spacer(modifier = Modifier.height(100.dp))
+                            Spacer(modifier = Modifier.height(120.dp))
                         }
                     }
                 }
@@ -1153,4 +1194,160 @@ fun MorePlaybackOptionsDialog(
             }
         }
     )
+}
+
+@Composable
+fun SquiggleSlider(
+    value: Float, // 0f to 1f
+    onValueChange: (Float) -> Unit,
+    onValueChangeFinished: () -> Unit,
+    isPlaying: Boolean,
+    colors: ColorPalette,
+    modifier: Modifier = Modifier
+) {
+    val density = LocalDensity.current
+    var width by remember { mutableStateOf(1f) }
+    var isDragging by remember { mutableStateOf(false) }
+
+    // Phase animation for the squiggle wave
+    val infiniteTransition = rememberInfiniteTransition(label = "SquigglePhase")
+    val phase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2 * Math.PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1500, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "Phase"
+    )
+
+    val activePhase = if (isPlaying) phase else 0f
+
+    // Smoothly animate the thumb radius on touch/drag
+    val thumbRadius by animateDpAsState(
+        targetValue = if (isDragging) 9.dp else 6.dp,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "ThumbRadius"
+    )
+
+    val heightDp = 32.dp
+
+    Box(
+        modifier = modifier
+            .height(heightDp)
+            .fillMaxWidth()
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onPress = { offset ->
+                        isDragging = true
+                        val newValue = (offset.x / width).coerceIn(0f, 1f)
+                        onValueChange(newValue)
+                        tryAwaitRelease()
+                        isDragging = false
+                        onValueChangeFinished()
+                    }
+                )
+            }
+            .pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = { offset ->
+                        isDragging = true
+                        val newValue = (offset.x / width).coerceIn(0f, 1f)
+                        onValueChange(newValue)
+                    },
+                    onDragEnd = {
+                        isDragging = false
+                        onValueChangeFinished()
+                    },
+                    onDragCancel = {
+                        isDragging = false
+                        onValueChangeFinished()
+                    },
+                    onDrag = { change, _ ->
+                        change.consume()
+                        val newValue = (change.position.x / width).coerceIn(0f, 1f)
+                        onValueChange(newValue)
+                    }
+                )
+            }
+    ) {
+        androidx.compose.foundation.Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .onGloballyPositioned { layoutCoordinates ->
+                    width = layoutCoordinates.size.width.toFloat()
+                }
+        ) {
+            val centerY = size.height / 2f
+            val endX = value * width
+            
+            val waveLengthPx = with(density) { 24.dp.toPx() }
+            val amplitudePx = with(density) { 4.dp.toPx() }
+            val strokeWidthPx = with(density) { 3.5.dp.toPx() }
+            val fadeDistancePx = with(density) { 24.dp.toPx() }
+
+            // 1. Draw Active Wave Track
+            if (endX > 0f) {
+                val path = Path()
+                path.moveTo(0f, centerY)
+
+                var x = 0f
+                // We'll increment x to plot the wave
+                while (x < endX) {
+                    val distanceToThumb = endX - x
+                    val fadeFactor = if (distanceToThumb < fadeDistancePx) {
+                        distanceToThumb / fadeDistancePx
+                    } else {
+                        1f
+                    }
+
+                    val radians = (x / waveLengthPx) * (2 * Math.PI) - activePhase
+                    val y = centerY + kotlin.math.sin(radians).toFloat() * amplitudePx * fadeFactor
+                    path.lineTo(x, y)
+                    x += 2f
+                }
+
+                // Smooth final point to avoid hard corner at the end of the step
+                val endRadians = (endX / waveLengthPx) * (2 * Math.PI) - activePhase
+                val endY = centerY + kotlin.math.sin(endRadians).toFloat() * amplitudePx * 0f // exactly 0 fade at endX
+                path.lineTo(endX, endY)
+
+                drawPath(
+                    path = path,
+                    color = colors.accent,
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(
+                        width = strokeWidthPx,
+                        cap = StrokeCap.Round
+                    )
+                )
+            }
+
+            // 2. Draw Inactive Track (sleek, straight line)
+            if (endX < width) {
+                drawLine(
+                    color = colors.textSecondary.copy(alpha = 0.24f),
+                    start = Offset(endX, centerY),
+                    end = Offset(width, centerY),
+                    strokeWidth = with(density) { 3.dp.toPx() },
+                    cap = StrokeCap.Round
+                )
+            }
+
+            // 3. Draw Thumb
+            drawCircle(
+                color = colors.accent,
+                radius = with(density) { thumbRadius.toPx() },
+                center = Offset(endX, centerY)
+            )
+            
+            // Subtle pulse ring around the thumb if dragging
+            if (isDragging) {
+                drawCircle(
+                    color = colors.accent.copy(alpha = 0.2f),
+                    radius = with(density) { (thumbRadius + 6.dp).toPx() },
+                    center = Offset(endX, centerY)
+                )
+            }
+        }
+    }
 }

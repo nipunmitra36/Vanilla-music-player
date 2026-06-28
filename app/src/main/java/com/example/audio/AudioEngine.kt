@@ -13,6 +13,7 @@ import kotlinx.coroutines.launch
 
 import android.media.audiofx.Equalizer
 import android.media.audiofx.BassBoost
+import android.media.audiofx.Virtualizer
 
 class AudioEngine private constructor(private val context: android.content.Context) {
     private val scope = CoroutineScope(Dispatchers.Default)
@@ -537,6 +538,7 @@ class AudioEngine private constructor(private val context: android.content.Conte
 
     private var equalizer: Equalizer? = null
     private var bassBoost: BassBoost? = null
+    private var virtualizer: Virtualizer? = null
 
     private fun getClosestBand(eq: Equalizer, frequencyHz: Int): Short {
         val numBands = eq.numberOfBands
@@ -595,6 +597,13 @@ class AudioEngine private constructor(private val context: android.content.Conte
                     Log.e("AudioEngine", "Error instantiating BassBoost", e)
                 }
             }
+            if (virtualizer == null) {
+                try {
+                    virtualizer = Virtualizer(0, mediaPlayer!!.audioSessionId)
+                } catch (e: Exception) {
+                    Log.e("AudioEngine", "Error instantiating Virtualizer", e)
+                }
+            }
 
             equalizer?.enabled = currentEq.isEnabled
             if (currentEq.isEnabled && equalizer != null) {
@@ -612,6 +621,11 @@ class AudioEngine private constructor(private val context: android.content.Conte
             bassBoost?.enabled = currentEq.bassBoostEnabled
             if (currentEq.bassBoostEnabled && bassBoost != null) {
                 bassBoost?.setStrength((currentEq.bassBoostStrength * 1000).toInt().toShort())
+            }
+
+            virtualizer?.enabled = currentEq.virtualizerEnabled
+            if (currentEq.virtualizerEnabled && virtualizer != null) {
+                virtualizer?.setStrength((currentEq.virtualizerStrength * 1000).toInt().toShort())
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -636,12 +650,14 @@ class AudioEngine private constructor(private val context: android.content.Conte
         try {
             equalizer?.release()
             bassBoost?.release()
+            virtualizer?.release()
             mediaPlayer?.release()
         } catch (e: Throwable) {
             Log.e("AudioEngine", "Error releasing MediaPlayer", e)
         }
         equalizer = null
         bassBoost = null
+        virtualizer = null
         mediaPlayer = null
     }
 }

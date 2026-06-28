@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
 import java.net.HttpURLConnection
 import java.net.URL
 import java.io.BufferedReader
@@ -204,6 +205,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun dismissInAppNotification() {
         _inAppNotification.value = null
+    }
+
+    fun postInAppNotification(message: String) {
+        _inAppNotification.value = message
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(4000)
+            if (_inAppNotification.value == message) {
+                _inAppNotification.value = null
+            }
+        }
     }
 
     fun triggerNewSongsNotification(newCount: Int) {
@@ -539,6 +550,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     if (audioEngine.playQueue.value.isEmpty()) {
                         audioEngine.playQueue.value = songs
                     }
+                    refreshAIRecommendations()
                 }
             } catch (e: Throwable) {
                 android.util.Log.e("MusicViewModel", "Error initializing play queue", e)
@@ -573,10 +585,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             val context = getApplication<Application>()
             val videoId = extractVideoId(url)
             val cleanVideoId = videoId.replace(Regex("[^a-zA-Z0-9_-]"), "")
-            val filename = "yt_${cleanVideoId}.mp3"
+            val format = _audioDownloadFormat.value
+            val ext = format.lowercase()
+            val filename = "yt_${cleanVideoId}.$ext"
             val targetFile = java.io.File(context.filesDir, "downloads/$filename")
 
-            _inAppNotification.value = "Downloading high-fidelity MP3 for \"$title\"..."
+            _inAppNotification.value = "Downloading high-fidelity $format for \"$title\"..."
 
             val downloadSuccess = withContext(Dispatchers.IO) {
                 try {
@@ -626,7 +640,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         targetFile.parentFile?.mkdirs()
                         val contentLength = finalConn.contentLengthLong
                         
-                        _downloadPhase.value = "Downloading MP3 file..."
+                        _downloadPhase.value = "Downloading $format file..."
                         val buffer = ByteArray(32768)
                         var bytesRead: Int
                         var totalBytes: Long = 0
@@ -654,7 +668,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         false
                     }
                 } catch (e: Exception) {
-                    android.util.Log.e("MusicViewModel", "Error downloading MP3", e)
+                    android.util.Log.e("MusicViewModel", "Error downloading $format", e)
                     false
                 }
             }
@@ -662,14 +676,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             if (downloadSuccess && targetFile.exists() && targetFile.length() > 0) {
                 val fileUri = "file://${targetFile.absolutePath}"
                 val newSong = com.example.data.Song(
-                    id = fileUri, // Use file:// URI so AudioEngine plays the real MP3 file
+                    id = fileUri, // Use file:// URI so AudioEngine plays the real file
                     title = title,
                     artist = artist,
                     album = "YouTube Downloads",
                     durationSeconds = 210, // 3:30 default
                     artworkColorHex = "#FF0000", // YouTube Red
                     audioPreset = "cinematic",
-                    lyrics = "Downloaded from YouTube\nURL: $url\n\n[00:00] YouTube audio conversion complete\n[00:15] Playing high-fidelity local stream",
+                    lyrics = "Downloaded from YouTube\nURL: $url\n\n[00:00] YouTube audio conversion complete\n[00:15] Playing high-fidelity $format stream",
                     isFavorite = false,
                     path = targetFile.absolutePath,
                     artworkUri = artworkUri
@@ -685,7 +699,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 setSong(newSong, autoplay = true)
                 
                 _sharedYouTubeUrl.value = null // clear after download to dismiss dialog
-                _inAppNotification.value = "Downloaded \"$title\" as MP3"
+                _inAppNotification.value = "Downloaded \"$title\" as $format"
             } else {
                 _inAppNotification.value = "Failed to download \"$title\". Please try again."
                 _sharedYouTubeUrl.value = null // dismiss dialog
@@ -1060,76 +1074,74 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (videoId.isEmpty()) return@withContext null
         try {
             val videoUrl = "https://www.youtube.com/watch?v=$videoId"
-            val urlObj = URL("https://api.loader.to/api/button/?url=${URLEncoder.encode(videoUrl, "UTF-8")}&f=mp3")
+            val encodedUrl = URLEncoder.encode(videoUrl, "UTF-8")
+            val requestUrl = "https://api.loader.to/api/ajax?url=$encodedUrl&format=mp3"
+            
+            android.util.Log.d("MusicViewModel", "Requesting Loader.to AJAX API: $requestUrl")
+            val urlObj = URL(requestUrl)
             val conn = urlObj.openConnection() as HttpURLConnection
             conn.requestMethod = "GET"
-            conn.connectTimeout = 8000
-            conn.readTimeout = 8000
+            conn.connectTimeout = 10000
+            conn.readTimeout = 10000
             conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+            conn.setRequestProperty("Accept", "application/json")
             
             if (conn.responseCode == 200) {
-                val reader = BufferedReader(InputStreamReader(conn.inputStream))
-                val html = StringBuilder()
-                var line: String?
-                while (reader.readLine().also { line = it } != null) {
-                    html.append(line).append("\n")
-                }
-                reader.close()
-                
-                val htmlStr = html.toString()
-                val allLinks = mutableListOf<String>()
-
-                // 1. Matches anything inside href="..." or href='...'
-                val hrefPattern = Regex("href=['\"]([^'\"]+)['\"]", RegexOption.IGNORE_CASE)
-                hrefPattern.findAll(htmlStr).forEach { m ->
-                    allLinks.add(m.groups[1]?.value ?: "")
-                }
-
-                // 2. Matches anything inside action="..." or action='...'
-                val actionPattern = Regex("action=['\"]([^'\"]+)['\"]", RegexOption.IGNORE_CASE)
-                actionPattern.findAll(htmlStr).forEach { m ->
-                    allLinks.add(m.groups[1]?.value ?: "")
-                }
-
-                // 3. Match raw URL patterns
-                val rawUrlPattern = Regex("https?://[^'\"\\s>]+")
-                rawUrlPattern.findAll(htmlStr).forEach { m ->
-                    allLinks.add(m.value)
-                }
-
-                for (link in allLinks) {
-                    var absoluteLink = link.trim()
-                    if (absoluteLink.isEmpty()) continue
-                    
-                    if (absoluteLink.startsWith("//")) {
-                        absoluteLink = "https:$absoluteLink"
-                    } else if (absoluteLink.startsWith("/")) {
-                        absoluteLink = "https://api.loader.to$absoluteLink"
-                    } else if (!absoluteLink.startsWith("http") && !absoluteLink.startsWith("javascript")) {
-                        absoluteLink = "https://api.loader.to/$absoluteLink"
-                    }
-                    
-                    if (absoluteLink.contains("loader.to") || 
-                        absoluteLink.contains("download") || 
-                        absoluteLink.contains("/dl/") || 
-                        absoluteLink.contains(".mp3") || 
-                        absoluteLink.contains(".m4a") || 
-                        absoluteLink.contains("googlevideo")) {
-                        
-                        if (!absoluteLink.contains("google.com") && 
-                            !absoluteLink.contains("facebook.com") && 
-                            !absoluteLink.contains("twitter.com") &&
-                            !absoluteLink.contains("api/button") &&
-                            absoluteLink != "https://api.loader.to/") {
-                            
-                            android.util.Log.d("MusicViewModel", "Found robust Loader.to audio link: $absoluteLink")
-                            return@withContext absoluteLink
+                val response = conn.inputStream.bufferedReader().use { it.readText() }
+                val json = JSONObject(response)
+                val success = json.optBoolean("success", false)
+                if (success) {
+                    val id = json.optString("id")
+                    if (id.isNotEmpty()) {
+                        android.util.Log.d("MusicViewModel", "Loader.to AJAX ID received: $id. Starting poll...")
+                        // Poll for progress and download URL
+                        var attempts = 0
+                        val maxAttempts = 30 // Wait up to 30 seconds
+                        while (attempts < maxAttempts) {
+                            delay(1000)
+                            try {
+                                val pollUrl = URL("https://api.loader.to/api/ajax?id=$id")
+                                val pollConn = pollUrl.openConnection() as HttpURLConnection
+                                pollConn.requestMethod = "GET"
+                                pollConn.connectTimeout = 5000
+                                pollConn.readTimeout = 5000
+                                pollConn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                                pollConn.setRequestProperty("Accept", "application/json")
+                                
+                                if (pollConn.responseCode == 200) {
+                                    val pollResponse = pollConn.inputStream.bufferedReader().use { it.readText() }
+                                    val pollJson = JSONObject(pollResponse)
+                                    val pollSuccess = pollJson.optBoolean("success", false)
+                                    if (pollSuccess) {
+                                        val progress = pollJson.optInt("progress", 0)
+                                        val downloadUrl = pollJson.optString("download_url", "")
+                                        val statusText = pollJson.optString("text", "")
+                                        android.util.Log.d("MusicViewModel", "Poll attempt $attempts: progress=$progress, text=$statusText")
+                                        
+                                        if (downloadUrl.isNotEmpty()) {
+                                            android.util.Log.d("MusicViewModel", "Loader.to conversion complete! Download URL: $downloadUrl")
+                                            return@withContext downloadUrl
+                                        }
+                                        
+                                        if (progress >= 1000 || statusText.equals("finished", ignoreCase = true)) {
+                                            if (downloadUrl.isNotEmpty()) {
+                                                return@withContext downloadUrl
+                                            }
+                                        }
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                android.util.Log.e("MusicViewModel", "Error during Loader.to poll: ${e.localizedMessage}")
+                            }
+                            attempts++
                         }
                     }
                 }
+            } else {
+                android.util.Log.e("MusicViewModel", "Loader.to API HTTP error response: ${conn.responseCode}")
             }
         } catch (e: Exception) {
-            android.util.Log.e("MusicViewModel", "Exception during Loader.to fetch: ${e.localizedMessage}")
+            android.util.Log.e("MusicViewModel", "Exception during Loader.to AJAX fetch: ${e.localizedMessage}")
         }
         null
     }
@@ -1200,12 +1212,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             if (dlUrl != null) return@withContext dlUrl
         }
 
-        // 2. Try Vevioz HTML parser fallback (highly stable, updated downloader)
-        android.util.Log.d("MusicViewModel", "Cobalt returned null. Falling back to Vevioz button API...")
+        // 2. Try Loader.to AJAX API (highly stable, cloud conversion with structured JSON polling)
+        android.util.Log.d("MusicViewModel", "Cobalt returned null. Falling back to Loader.to AJAX API...")
+        val loaderToUrl = fetchLoaderToAudioUrl(videoId)
+        if (loaderToUrl != null) return@withContext loaderToUrl
+
+        // 3. Try Vevioz HTML parser fallback (highly stable, updated downloader)
+        android.util.Log.d("MusicViewModel", "Loader.to returned null. Falling back to Vevioz button API...")
         val veviozUrl = fetchVeviozAudioUrl(videoId)
         if (veviozUrl != null) return@withContext veviozUrl
 
-        // 3. Try Invidious dynamically loaded instances (healthy live servers)
+        // 4. Try Invidious dynamically loaded instances (healthy live servers)
         android.util.Log.d("MusicViewModel", "Vevioz returned null. Falling back to dynamic Invidious instances...")
         val dynamicInvidious = fetchDynamicInvidiousInstances()
         for (instance in dynamicInvidious) {
@@ -1247,18 +1264,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // 4. Try Piped API
+        // 5. Try Piped API
         android.util.Log.d("MusicViewModel", "Dynamic Invidious returned null. Falling back to Piped API...")
         val pipedUrl = fetchPipedAudioUrl(videoId)
         if (pipedUrl != null) return@withContext pipedUrl
-        
-        // 5. Try Loader.to HTML parser fallback
-        android.util.Log.d("MusicViewModel", "Piped returned null. Falling back to Loader.to...")
-        val loaderToUrl = fetchLoaderToAudioUrl(videoId)
-        if (loaderToUrl != null) return@withContext loaderToUrl
 
         // 6. Try standard hardcoded Invidious API as absolute final API fallback
-        android.util.Log.d("MusicViewModel", "Loader.to returned null. Trying final Invidious fallback...")
+        android.util.Log.d("MusicViewModel", "Piped returned null. Trying final Invidious fallback...")
         val invidiousUrl = fetchInvidiousAudioUrl(videoId)
         if (invidiousUrl != null) return@withContext invidiousUrl
 
@@ -1607,6 +1619,60 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         navigateTo(ScreenState.PLAYLIST_DETAILS)
     }
 
+    // AI Personalized Recommendations State
+    private val _aiRecommendedSongs = MutableStateFlow<List<Song>>(emptyList())
+    val aiRecommendedSongs = _aiRecommendedSongs.asStateFlow()
+
+    private val _aiTasteAnalysis = MutableStateFlow<String>("Awaiting analysis...")
+    val aiTasteAnalysis = _aiTasteAnalysis.asStateFlow()
+
+    fun refreshAIRecommendations() {
+        viewModelScope.launch {
+            _aiGenerationStatus.value = "AI is analyzing your acoustic signature..."
+            kotlinx.coroutines.delay(1500)
+
+            val songsList = allSongs.value
+            if (songsList.isEmpty()) {
+                _aiRecommendedSongs.value = emptyList()
+                _aiTasteAnalysis.value = "Add offline/local songs to your library to kickstart AI Recommendations."
+                _aiGenerationStatus.value = null
+                return@launch
+            }
+
+            // Find played songs
+            val playedSongs = songsList.filter { it.playCount > 0 || it.isFavorite }
+            if (playedSongs.isEmpty()) {
+                // Return top presets as curated starter mix
+                val starterList = songsList.shuffled().take(4)
+                _aiRecommendedSongs.value = starterList
+                _aiTasteAnalysis.value = "Eclectic Starter: Ready to learn your signature as you play more tracks."
+            } else {
+                // Group by audioPreset or artist
+                val favoritePreset = playedSongs.groupBy { it.audioPreset }.maxByOrNull { it.value.size }?.key ?: "ambient"
+                val recommendations = songsList.filter { it.audioPreset == favoritePreset && !playedSongs.contains(it) }.shuffled().take(4)
+
+                val finalRecs = if (recommendations.size < 4) {
+                    (recommendations + songsList.filter { !playedSongs.contains(it) }.shuffled()).distinctBy { it.id }.take(4)
+                } else {
+                    recommendations
+                }
+
+                _aiRecommendedSongs.value = if (finalRecs.isNotEmpty()) finalRecs else songsList.shuffled().take(4)
+
+                val vibeDescription = when (favoritePreset) {
+                    "ambient" -> "Vibe: Chill & Atmospheric. You prefer spacious, calming, and soothing soundscapes."
+                    "bouncy" -> "Vibe: High Energy & Bass. You enjoy rich bass lines and uplifting rhythms."
+                    "cinematic" -> "Vibe: Orchestral & Deep. You prefer dramatic, cinematic, and storytelling music."
+                    "romantic" -> "Vibe: Warm & Vocal. You appreciate clear vocals and expressive melodies."
+                    "indie" -> "Vibe: Acoustic & Authentic. You like modern indie-folk and natural instrumentations."
+                    else -> "Vibe: Dynamic Fusion. Your taste is highly versatile across genres."
+                }
+                _aiTasteAnalysis.value = vibeDescription
+            }
+            _aiGenerationStatus.value = null
+        }
+    }
+
     fun seekTo(seconds: Int) {
         audioEngine.seekTo(seconds)
     }
@@ -1756,9 +1822,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 "Pop" -> state.copy(band60Hz = -1f, band230Hz = 2f, band910Hz = 5f, band3600Hz = 3f, band14000Hz = -1f)
                 "Jazz" -> state.copy(band60Hz = 3f, band230Hz = 2f, band910Hz = -2f, band3600Hz = 3f, band14000Hz = 4f)
                 "Bass Boost" -> state.copy(band60Hz = 8f, band230Hz = 5f, band910Hz = 0f, band3600Hz = 0f, band14000Hz = 0f)
+                "Deep Bass Boost" -> state.copy(band60Hz = 9f, band230Hz = 6f, band910Hz = 1f, band3600Hz = -2f, band14000Hz = -1f)
                 "Vocal Boost" -> state.copy(band60Hz = -2f, band230Hz = 0f, band910Hz = 6f, band3600Hz = 4f, band14000Hz = -1f)
+                "Clear Vocals" -> state.copy(band60Hz = -3f, band230Hz = -1f, band910Hz = 4f, band3600Hz = 6f, band14000Hz = 3f)
                 "Acoustic" -> state.copy(band60Hz = 4f, band230Hz = 1f, band910Hz = 2f, band3600Hz = 3f, band14000Hz = 4f)
+                "Acoustic Clarity" -> state.copy(band60Hz = 3f, band230Hz = 2f, band910Hz = 1f, band3600Hz = 5f, band14000Hz = 6f)
                 "Electronic" -> state.copy(band60Hz = 6f, band230Hz = 5f, band910Hz = -2f, band3600Hz = 5f, band14000Hz = 6f)
+                "Studio Master" -> state.copy(band60Hz = 1f, band230Hz = 1f, band910Hz = 2f, band3600Hz = 2f, band14000Hz = 3f)
                 else -> state
             }
             _equalizerState.value = newState
@@ -1776,6 +1846,33 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateBassBoostStrength(strength: Float) {
+        viewModelScope.launch {
+            val newState = _equalizerState.value.copy(bassBoostStrength = strength)
+            _equalizerState.value = newState
+            audioEngine.setEqualizerState(newState)
+            repository.saveEqualizerSettings(newState)
+        }
+    }
+
+    fun toggleVirtualizer(isEnabled: Boolean) {
+        viewModelScope.launch {
+            val newState = _equalizerState.value.copy(virtualizerEnabled = isEnabled)
+            _equalizerState.value = newState
+            audioEngine.setEqualizerState(newState)
+            repository.saveEqualizerSettings(newState)
+        }
+    }
+
+    fun updateVirtualizerStrength(strength: Float) {
+        viewModelScope.launch {
+            val newState = _equalizerState.value.copy(virtualizerStrength = strength)
+            _equalizerState.value = newState
+            audioEngine.setEqualizerState(newState)
+            repository.saveEqualizerSettings(newState)
+        }
+    }
+
     fun resetEqualizer() {
         viewModelScope.launch {
             val newState = EqualizerState(
@@ -1786,12 +1883,23 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 band3600Hz = 0f,
                 band14000Hz = 0f,
                 bassBoostEnabled = false,
-                bassBoostStrength = 0.5f
+                bassBoostStrength = 0.5f,
+                virtualizerEnabled = false,
+                virtualizerStrength = 0.5f
             )
             _equalizerState.value = newState
             audioEngine.setEqualizerState(newState)
             repository.saveEqualizerSettings(newState)
         }
+    }
+
+    // Audio format preference State
+    private val _audioDownloadFormat = MutableStateFlow(prefs.getString("audio_download_format", "MP3") ?: "MP3")
+    val audioDownloadFormat = _audioDownloadFormat.asStateFlow()
+
+    fun changeAudioDownloadFormat(format: String) {
+        _audioDownloadFormat.value = format
+        prefs.edit().putString("audio_download_format", format).apply()
     }
 
     fun toggleLyricsExpanded() {

@@ -114,7 +114,7 @@ fun EqualizerView(
             val alpha = if (eqState.isEnabled) 1.0f else 0.4f
             
             var presetMenuExpanded by remember { mutableStateOf(false) }
-            val presets = listOf("Balanced", "Hall Room", "Rock", "Classical", "Pop", "Jazz", "Bass Boost", "Vocal Boost", "Acoustic", "Electronic", "Custom")
+            val presets = listOf("Balanced", "Hall Room", "Rock", "Classical", "Pop", "Jazz", "Bass Boost", "Deep Bass Boost", "Vocal Boost", "Clear Vocals", "Acoustic", "Acoustic Clarity", "Electronic", "Studio Master", "Custom")
 
             // Presets Dropdown trigger
             Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(colors.surface).clickable(enabled = eqState.isEnabled) { presetMenuExpanded = true }.padding(horizontal = 24.dp, vertical = 16.dp)) {
@@ -254,39 +254,147 @@ fun EqualizerView(
             // Bass Boost section at the very bottom
             Divider(color = colors.surface, thickness = 1.dp)
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column {
-                    Text(
-                        text = "Bass boost",
-                        color = colors.textPrimary,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = "Boosts lower frequencies",
-                        color = colors.textSecondary,
-                        fontSize = 12.sp
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text(
+                            text = "Bass boost",
+                            color = colors.textPrimary,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Boosts lower frequencies",
+                            color = colors.textSecondary,
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    Switch(
+                        checked = eqState.bassBoostEnabled,
+                        onCheckedChange = { viewModel.toggleBassBoost(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = colors.accent
+                        ),
+                        modifier = Modifier.testTag("bass_boost_switch")
                     )
                 }
 
-                Switch(
-                    checked = eqState.bassBoostEnabled,
-                    onCheckedChange = { viewModel.toggleBassBoost(it) },
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.White,
-                        checkedTrackColor = colors.accent
-                    ),
-                    modifier = Modifier.testTag("bass_boost_switch")
-                )
+                if (eqState.bassBoostEnabled) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Strength",
+                            color = colors.textSecondary,
+                            fontSize = 12.sp,
+                            modifier = Modifier.width(64.dp)
+                        )
+                        Slider(
+                            value = eqState.bassBoostStrength,
+                            onValueChange = { viewModel.updateBassBoostStrength(it) },
+                            colors = SliderDefaults.colors(
+                                thumbColor = colors.accent,
+                                activeTrackColor = colors.accent,
+                                inactiveTrackColor = colors.selectedBackground
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text(
+                            text = "${(eqState.bassBoostStrength * 100).toInt()}%",
+                            color = colors.textSecondary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.width(52.dp),
+                            textAlign = TextAlign.End
+                        )
+                    }
+                }
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Divider(color = colors.surface, thickness = 1.dp)
+
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text(
+                            text = "3D Virtualizer",
+                            color = colors.textPrimary,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Simulates spatial surround sound effect",
+                            color = colors.textSecondary,
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    Switch(
+                        checked = eqState.virtualizerEnabled,
+                        onCheckedChange = { viewModel.toggleVirtualizer(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = colors.accent
+                        ),
+                        modifier = Modifier.testTag("virtualizer_switch")
+                    )
+                }
+
+                if (eqState.virtualizerEnabled) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Surround",
+                            color = colors.textSecondary,
+                            fontSize = 12.sp,
+                            modifier = Modifier.width(64.dp)
+                        )
+                        Slider(
+                            value = eqState.virtualizerStrength,
+                            onValueChange = { viewModel.updateVirtualizerStrength(it) },
+                            colors = SliderDefaults.colors(
+                                thumbColor = colors.accent,
+                                activeTrackColor = colors.accent,
+                                inactiveTrackColor = colors.selectedBackground
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text(
+                            text = "${(eqState.virtualizerStrength * 100).toInt()}%",
+                            color = colors.textSecondary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.width(52.dp),
+                            textAlign = TextAlign.End
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
 
             // External Equalizer Option
             Button(

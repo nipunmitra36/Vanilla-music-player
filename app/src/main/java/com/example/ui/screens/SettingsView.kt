@@ -37,10 +37,12 @@ fun SettingsView(
     val isScanning by viewModel.isScanning.collectAsState()
     val scannedFilesCount by viewModel.scannedFilesCount.collectAsState()
     val themeMode by viewModel.themeMode.collectAsState()
+    val downloadFormat by viewModel.audioDownloadFormat.collectAsState()
 
     var showAboutDialog by remember { mutableStateOf(false) }
     var showThemeDialog by remember { mutableStateOf(false) }
     var showLyricsDialog by remember { mutableStateOf(false) }
+    var showFormatDialog by remember { mutableStateOf(false) }
     var lyricScrollSpeed by remember { mutableStateOf("Normal") }
 
     Scaffold(
@@ -96,6 +98,18 @@ fun SettingsView(
                     onClick = { viewModel.navigateTo(ScreenState.EQUALIZER) }
                 )
             }
+
+            // Audio Download Format
+            item {
+                SettingsItem(
+                    title = "Audio download format",
+                    subtitle = "Current: $downloadFormat (FLAC, WAV, AAC, MP3)",
+                    icon = Icons.Default.Download,
+                    iconTint = Color(0xFF9B59B6),
+                    colors = colors,
+                    onClick = { showFormatDialog = true }
+                )
+            }
             
             // 7. Scan Songs
             item {
@@ -145,17 +159,7 @@ fun SettingsView(
                 )
             }
 
-            // 6. Setup Guide
-            item {
-                SettingsItem(
-                    title = "Run setup guide",
-                    subtitle = "Welcome tutorial, reset guide configurations",
-                    icon = Icons.Default.Dashboard,
-                    iconTint = Color(0xFF673AB7), // purple circle
-                    colors = colors,
-                    onClick = { viewModel.setSetupGuideCompleted(false) }
-                )
-            }
+
 
         }
     }
@@ -319,6 +323,51 @@ fun SettingsView(
         )
     }
 
+    if (showFormatDialog) {
+        val formats = listOf("MP3 (Standard)", "AAC (High Quality)", "FLAC (Lossless)", "WAV (Uncompressed)")
+        AlertDialog(
+            onDismissRequest = { showFormatDialog = false },
+            title = { Text("Preferred download format", color = colors.textPrimary) },
+            containerColor = colors.surface,
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Select your preferred download & streaming container quality.", color = colors.textSecondary, fontSize = 12.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    formats.forEach { option ->
+                        val code = option.split(" ").first()
+                        val isSelected = downloadFormat.equals(code, ignoreCase = true)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    viewModel.changeAudioDownloadFormat(code)
+                                    showFormatDialog = false
+                                }
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = isSelected,
+                                onClick = {
+                                    viewModel.changeAudioDownloadFormat(code)
+                                    showFormatDialog = false
+                                },
+                                colors = RadioButtonDefaults.colors(selectedColor = colors.accent)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(option, color = colors.textPrimary, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showFormatDialog = false }) {
+                    Text("Close", color = colors.accent)
+                }
+            }
+        )
+    }
+
     // About Dialog
     val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
     if (showAboutDialog) {
@@ -357,17 +406,6 @@ fun SettingsView(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // Premium Developer Avatar Image
-                        Image(
-                            painter = painterResource(id = com.example.R.drawable.img_profile_avatar),
-                            contentDescription = "Nipun Mitra",
-                            modifier = Modifier
-                                .size(64.dp)
-                                .clip(CircleShape)
-                                .border(1.5.dp, colors.accent, CircleShape),
-                            contentScale = ContentScale.Crop
-                        )
-
                         // Verified Name Row
                         Row(
                             verticalAlignment = Alignment.CenterVertically,

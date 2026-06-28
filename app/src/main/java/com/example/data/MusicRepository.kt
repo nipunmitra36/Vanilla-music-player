@@ -54,110 +54,10 @@ class MusicRepository(private val context: Context) {
                 )
             }
             
-            // 2. Seed default high-fidelity premium synthetic songs if DB is empty
+            // 2. No default songs seeded. Ready for user's custom local & imported tracks.
             val currentSongs = songDao.getAllSongs()
             if (currentSongs.isEmpty()) {
-                android.util.Log.d("MusicRepository", "Seeding 8 default synthetic songs...")
-                val seedSongs = listOf(
-                    Song(
-                        id = "song_tauba",
-                        title = "Tauba Tauba",
-                        artist = "Karan Aujla",
-                        album = "Tauba Remix",
-                        durationSeconds = 185,
-                        artworkColorHex = "#4A1D20",
-                        audioPreset = "bouncy",
-                        lyrics = "Tauba Tauba re tauba!\n\nEnjoy premium high fidelity synthesis by Musicly.\n\n[00:10] Nachdi tu thakdi na step tere crazy\n[00:25] Bass boost pumping\n[00:45] Feel the soft synthesizer flow",
-                        isFavorite = false,
-                        orderIndex = 0
-                    ),
-                    Song(
-                        id = "song_dilko",
-                        title = "Dil Ko Karaar Aaya",
-                        artist = "Neha Kakkar",
-                        album = "Sizzling Melodies",
-                        durationSeconds = 240,
-                        artworkColorHex = "#1A301D",
-                        audioPreset = "romantic",
-                        lyrics = "Dil ko karaar aaya,\n\nTujhpe hai pyaar aaya...\n\nSymphonic high fidelity vibes.\n\n[00:15] Sukoon mila man ko\n[00:35] Shreya-accentuated harmonics play",
-                        isFavorite = false,
-                        orderIndex = 1
-                    ),
-                    Song(
-                        id = "song_thik_emon",
-                        title = "Thik Emon Babe",
-                        artist = "Anupam Roy",
-                        album = "Acoustic Forest",
-                        durationSeconds = 210,
-                        artworkColorHex = "#1D3F23",
-                        audioPreset = "ambient",
-                        lyrics = "Thik emon babe,\n\nTumi thako...\n\nSoft forest synth strings.\n\n[00:20] Kacher thaka roye jaye\n[00:45] Wind chimes synthesis active",
-                        isFavorite = false,
-                        orderIndex = 2
-                    ),
-                    Song(
-                        id = "song_teri_meri",
-                        title = "Teri Meri Kahani",
-                        artist = "Arijit Singh",
-                        album = "Cinematic Nostalgia",
-                        durationSeconds = 265,
-                        artworkColorHex = "#32163F",
-                        audioPreset = "cinematic",
-                        lyrics = "Teri meri, meri teri,\n\nKahani...\n\nHigh-definition orchestral atmosphere.\n\n[00:12] Khamoshiyo ka bayaan hai\n[00:30] Strings swelling",
-                        isFavorite = false,
-                        orderIndex = 3
-                    ),
-                    Song(
-                        id = "song_chupi",
-                        title = "Chupi Chupi",
-                        artist = "Arijit Singh",
-                        album = "Late Night Ambient",
-                        durationSeconds = 280,
-                        artworkColorHex = "#1F232D",
-                        audioPreset = "ambient",
-                        lyrics = "Chupi chupi ashe,\n\nMon kade...\n\nCalm starry twilight pads.\n\n[00:22] Adhare bheshe thaka gaan",
-                        isFavorite = false,
-                        orderIndex = 4
-                    ),
-                    Song(
-                        id = "song_ay_na",
-                        title = "Ay Na",
-                        artist = "Shreya Ghoshal",
-                        album = "Golden Hour Session",
-                        durationSeconds = 222,
-                        artworkColorHex = "#4D381B",
-                        audioPreset = "romantic",
-                        lyrics = "Ay na kache ay...\n\nDelicate crystal bells.\n\n[00:18] Hawa bole jaye tora",
-                        isFavorite = false,
-                        orderIndex = 5
-                    ),
-                    Song(
-                        id = "song_ranu",
-                        title = "Ranu Mondal Synth",
-                        artist = "Musicly Synth",
-                        album = "Viral Wave",
-                        durationSeconds = 195,
-                        artworkColorHex = "#4A181C",
-                        audioPreset = "indie",
-                        lyrics = "Teri meri, teri meri...\n\nRetro-futuristic indie preset.\n\n[00:10] Harmonized humming sounds",
-                        isFavorite = false,
-                        orderIndex = 6
-                    ),
-                    Song(
-                        id = "song_shibu",
-                        title = "Shibu Beats",
-                        artist = "Shibu Synth",
-                        album = "Bass Camp",
-                        durationSeconds = 150,
-                        artworkColorHex = "#232616",
-                        audioPreset = "bouncy",
-                        lyrics = "Pure synth power.\n\nBounce to the beat.\n\n[00:05] Techno bass engine online",
-                        isFavorite = false,
-                        orderIndex = 7
-                    )
-                )
-                songDao.insertSongs(seedSongs)
-                android.util.Log.d("MusicRepository", "Seeded 8 songs successfully")
+                android.util.Log.d("MusicRepository", "Clean database initialization complete.")
             }
         } catch (e: Throwable) {
             android.util.Log.e("MusicRepository", "Error initializing database", e)
@@ -196,6 +96,30 @@ class MusicRepository(private val context: Context) {
     suspend fun deleteSong(song: Song) = withContext(Dispatchers.IO) {
         playlistDao.deleteCrossRefsForSong(song.id)
         songDao.deleteSong(song)
+        
+        // Try to delete physical file if it exists
+        if (song.path.isNotEmpty()) {
+            try {
+                val file = java.io.File(song.path)
+                if (file.exists() && file.isFile) {
+                    val deleted = file.delete()
+                    android.util.Log.d("MusicRepository", "Physical file deleted: $deleted, path: ${song.path}")
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MusicRepository", "Error deleting physical file", e)
+            }
+        }
+        
+        // Track the deleted song to prevent it from reappearing during MediaStore scans
+        val sharedPrefs = context.getSharedPreferences("musicly_deleted_songs", Context.MODE_PRIVATE)
+        val deletedSet = sharedPrefs.getStringSet("deleted_song_ids", emptySet()) ?: emptySet()
+        val newDeletedSet = deletedSet.toMutableSet().apply {
+            add(song.id)
+            if (song.path.isNotEmpty()) {
+                add(song.path)
+            }
+        }
+        sharedPrefs.edit().putStringSet("deleted_song_ids", newDeletedSet).apply()
     }
 
     suspend fun addDownloadedSong(song: Song) = withContext(Dispatchers.IO) {
@@ -221,6 +145,10 @@ class MusicRepository(private val context: Context) {
     suspend fun scanLocalMediaStoreSongs(): List<Song> = withContext(Dispatchers.IO) {
         val existingSongs = songDao.getAllSongs()
         val existingSongsMap = existingSongs.associateBy { it.id }
+        
+        // Load the set of deleted songs to ignore them during scanning
+        val sharedPrefs = context.getSharedPreferences("musicly_deleted_songs", android.content.Context.MODE_PRIVATE)
+        val deletedSet = sharedPrefs.getStringSet("deleted_song_ids", emptySet()) ?: emptySet()
         
         val scannedList = mutableListOf<Song>()
         try {
@@ -275,6 +203,10 @@ class MusicRepository(private val context: Context) {
                     val durationSecs = if (durationMs > 0) (durationMs / 1000).toInt() else 244
                     
                     val songId = "external_$mediaId"
+                    if (deletedSet.contains(songId) || (path.isNotEmpty() && deletedSet.contains(path))) {
+                        android.util.Log.d("MusicRepository", "Skipping deleted song: $title (ID: $songId)")
+                        continue
+                    }
                     val existingSong = existingSongsMap[songId]
                     
                     if (existingSong != null) {

@@ -1,35 +1,5 @@
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    
-    <!-- 1. Green Curved Hill Segment in bottom-left corner -->
-    <path
-        android:fillColor="#539C5E"
-        android:pathData="M14,108 L14,60 Q36,75 58,108 Z" />
-
-    <!-- 2. Overlay vertical graphic waveform lines inside the green segment -->
-    <path
-        android:strokeColor="#1F4125"
-        android:strokeWidth="1.8"
-        android:strokeAlpha="0.6"
-        android:pathData="M20,80 L20,95 M26,74 L26,98 M32,70 L32,101 M38,72 L38,102 M44,76 L44,103 M50,83 L50,105" />
-
-    <!-- 3. Dark Slate-Blue Music Note -->
-    <!-- Note Head Circle centered at (46, 82) with radius 12 -->
-    <path
-        android:fillColor="#293B4E"
-        android:pathData="M34,82 A12,12 0 1,0 58,82 A12,12 0 1,0 34,82 Z" />
-
-    <!-- Note Stem -->
-    <path
-        android:fillColor="#293B4E"
-        android:pathData="M52,24 L58,24 L58,82 L52,82 Z" />
-
-    <!-- Note Flag -->
-    <path
-        android:fillColor="#293B4E"
-        android:pathData="M52,24 Q68,26 74,44 Q66,35 58,34 Z" />
-
-</vector>
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:drawable="@drawable/img_app_logo" />
+</layer-list>

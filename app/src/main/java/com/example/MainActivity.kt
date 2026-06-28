@@ -5,16 +5,22 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.*
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -38,6 +44,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.zIndex
 import androidx.compose.material.icons.filled.Close
@@ -192,6 +201,12 @@ class MainActivity : ComponentActivity() {
                         textPrimary = Color(0xFFE1ECE2),
                         textSecondary = Color(0xFF90A292)
                     )
+                }
+
+                var showSplash by remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) {
+                    kotlinx.coroutines.delay(2500)
+                    showSplash = false
                 }
 
                 Surface(
@@ -461,12 +476,14 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    // Setup Welcome Guide Dialog overlay
-                    if (!setupGuideCompleted) {
-                        SetupGuideDialog(
-                            colors = colors,
-                            onComplete = { viewModel.setSetupGuideCompleted(true) }
-                        )
+
+
+                    AnimatedVisibility(
+                        visible = showSplash,
+                        enter = fadeIn(),
+                        exit = fadeOut(animationSpec = tween(600))
+                    ) {
+                        SplashScreen(colors = colors)
                     }
                 }
             }
@@ -519,113 +536,176 @@ fun Greeting(name: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun SetupGuideDialog(
-    colors: ColorPalette,
-    onComplete: () -> Unit
-) {
-    var step by remember { mutableStateOf(1) }
-    val totalSteps = 4
+fun SplashScreen(colors: ColorPalette) {
+    // We animate background glow pulse and scale of the logo and tagline
+    val infiniteTransition = rememberInfiniteTransition(label = "SplashGlow")
+    val pulseGlow by infiniteTransition.animateFloat(
+        initialValue = 0.6f,
+        targetValue = 1.2f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2500, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "Pulse"
+    )
 
-    AlertDialog(
-        onDismissRequest = {}, // Enforce walkthrough completion
-        containerColor = colors.surface,
-        title = {
-            Text(
-                text = when(step) {
-                    1 -> "Welcome to Musicly"
-                    2 -> "Precision Equalizer Tuning"
-                    3 -> "Smart Crossfade & Transitions"
-                    else -> "Offline Playlists & Library"
-                },
-                color = colors.accent,
-                fontWeight = FontWeight.Bold,
-                fontSize = 20.sp
+    var startAnimation by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        startAnimation = true
+    }
+
+    val scaleLogo by animateFloatAsState(
+        targetValue = if (startAnimation) 1f else 0.7f,
+        animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessLow),
+        label = "LogoScale"
+    )
+
+    val alphaContent by animateFloatAsState(
+        targetValue = if (startAnimation) 1f else 0f,
+        animationSpec = tween(1200, delayMillis = 300),
+        label = "ContentAlpha"
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black), // Premium black base
+        contentAlignment = Alignment.Center
+    ) {
+        // Blur gradient background (using canvas drawing behind)
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val width = size.width
+            val height = size.height
+            
+            // Neon Violet gradient blob 1
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        Color(0xFF8E2DE2).copy(alpha = 0.25f * pulseGlow),
+                        Color.Transparent
+                    ),
+                    center = Offset(width * 0.25f, height * 0.3f),
+                    radius = width * 0.7f
+                )
             )
-        },
-        text = {
+            
+            // Neon Pink gradient blob 2
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        Color(0xFFF000FF).copy(alpha = 0.2f * (2f - pulseGlow)),
+                        Color.Transparent
+                    ),
+                    center = Offset(width * 0.75f, height * 0.7f),
+                    radius = width * 0.8f
+                )
+            )
+        }
+
+        // Modern Glassmorphism Card
+        Box(
+            modifier = Modifier
+                .padding(24.dp)
+                .widthIn(max = 380.dp)
+                .graphicsLayer {
+                    scaleX = scaleLogo
+                    scaleY = scaleLogo
+                }
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color.White.copy(alpha = 0.04f)) // frosted glass look
+                .border(
+                    BorderStroke(
+                        1.dp,
+                        Brush.linearGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.15f),
+                                Color.White.copy(alpha = 0.02f)
+                            )
+                        )
+                    ),
+                    RoundedCornerShape(24.dp)
+                )
+                .padding(horizontal = 32.dp, vertical = 40.dp),
+            contentAlignment = Alignment.Center
+        ) {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Elegant themed icon holder
-                Box(
+                // Fully filled premium logo
+                MusiclyLogo(
                     modifier = Modifier
-                        .size(72.dp)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(colors.accent.copy(alpha = 0.12f))
-                        .border(1.5.dp, colors.accent.copy(alpha = 0.4f), RoundedCornerShape(20.dp)),
-                    contentAlignment = Alignment.Center
+                        .size(96.dp)
+                        .shadow(16.dp, CircleShape, ambientColor = Color(0xFFF000FF), spotColor = Color(0xFF8E2DE2))
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.graphicsLayer { alpha = alphaContent }
                 ) {
-                    Icon(
-                        imageVector = when(step) {
-                            1 -> Icons.Default.MusicNote
-                            2 -> Icons.Default.Tune
-                            3 -> Icons.Default.AutoAwesome
-                            else -> Icons.Default.QueueMusic
-                        },
-                        contentDescription = null,
-                        tint = colors.accent,
-                        modifier = Modifier.size(36.dp)
+                    // "Musicly" Text in Premium Typography
+                    Text(
+                        text = "Musicly",
+                        color = Color.White,
+                        fontSize = 32.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.5.sp
+                    )
+
+                    // Best Tagline Suggestion: "Feel Every Beat"
+                    Text(
+                        text = "Feel Every Beat",
+                        color = Color.White.copy(alpha = 0.6f),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        letterSpacing = 2.sp
                     )
                 }
 
-                // Premium Material 3 Carousel Dot Indicator
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    for (i in 1..totalSteps) {
-                        val isActive = i == step
-                        Box(
-                            modifier = Modifier
-                                .height(6.dp)
-                                .width(if (isActive) 18.dp else 6.dp)
-                                .clip(RoundedCornerShape(3.dp))
-                                .background(
-                                    if (isActive) colors.accent else colors.textSecondary.copy(alpha = 0.3f)
-                                )
-                        )
-                    }
-                }
+                Spacer(modifier = Modifier.height(16.dp))
 
-                Text(
-                    text = when(step) {
-                        1 -> "Your ultimate local offline music companion. Experience a warm, natural design aesthetic combined with lightning-fast local performance, seamless transitions, and real-time scrolling lyrics."
-                        2 -> "Sculpt your sound with our built-in 5-band soft-equalizer and hardware bass booster. Customize your bass thumps (60Hz), warm acoustics (230Hz), mid vocals (910Hz), presence (3.6kHz), and high brilliance (14kHz)."
-                        3 -> "Eliminate silent gaps between songs automatically! Customize dynamic crossfade timings, toggle silence skipping to bypass empty outros, and view real-time synchronized karaoke-style lyrics."
-                        else -> "Build local playlists and organize your audio files in real-time. Everything is indexed and cached locally inside a robust SQLite database, ensuring completely offline playback without any internet."
-                    },
-                    color = colors.textPrimary,
-                    fontSize = 13.sp,
-                    textAlign = TextAlign.Center,
-                    lineHeight = 18.sp
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (step < totalSteps) {
-                        step++
-                    } else {
-                        onComplete()
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = colors.accent),
-                modifier = Modifier.testTag("welcome_next_confirm_button")
-            ) {
-                Text(if (step < totalSteps) "Next" else "Get Started", color = Color.White)
-            }
-        },
-        dismissButton = {
-            if (step > 1) {
-                TextButton(onClick = { step-- }) {
-                    Text("Back", color = colors.accent)
+                // Premium thin loading indicator
+                Box(
+                    modifier = Modifier
+                        .width(100.dp)
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(1.5.dp))
+                        .background(Color.White.copy(alpha = 0.1f))
+                ) {
+                    val progressTransition = rememberInfiniteTransition(label = "Progress")
+                    val progressX by progressTransition.animateFloat(
+                        initialValue = -100f,
+                        targetValue = 100f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(1500, easing = FastOutSlowInEasing),
+                            repeatMode = RepeatMode.Restart
+                        ),
+                        label = "progress"
+                    )
+                    
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .width(40.dp)
+                            .graphicsLayer {
+                                translationX = progressX * density
+                            }
+                            .background(
+                                Brush.horizontalGradient(
+                                    colors = listOf(
+                                        Color(0xFF8E2DE2),
+                                        Color(0xFFF000FF)
+                                    )
+                                )
+                            )
+                    )
                 }
             }
         }
-    )
+    }
 }
+
+

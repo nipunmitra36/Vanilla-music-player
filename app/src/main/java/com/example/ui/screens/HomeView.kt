@@ -92,6 +92,18 @@ fun HomeView(
         sortedList
     }
 
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val voiceSearchLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val spokenText = result.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+            if (!spokenText.isNullOrBlank()) {
+                viewModel.setSearchQuery(spokenText)
+            }
+        }
+    }
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = colors.background,
@@ -121,11 +133,27 @@ fun HomeView(
                             ),
                             singleLine = true,
                             trailingIcon = {
-                                IconButton(onClick = {
-                                    viewModel.setSearchQuery("")
-                                    activeSearch = false
-                                }) {
-                                    Icon(Icons.Default.Close, contentDescription = "Close search", tint = colors.accent)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(onClick = {
+                                        val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                                            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault())
+                                            putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Speak song or artist name...")
+                                        }
+                                        try {
+                                            voiceSearchLauncher.launch(intent)
+                                        } catch (e: Exception) {
+                                            viewModel.postInAppNotification("Speech recognition is not supported on this device.")
+                                        }
+                                    }) {
+                                        Icon(Icons.Default.Mic, contentDescription = "Voice search", tint = colors.accent)
+                                    }
+                                    IconButton(onClick = {
+                                        viewModel.setSearchQuery("")
+                                        activeSearch = false
+                                    }) {
+                                        Icon(Icons.Default.Close, contentDescription = "Close search", tint = colors.accent)
+                                    }
                                 }
                             }
                         )
@@ -155,6 +183,24 @@ fun HomeView(
                 },
                 actions = {
                     if (!activeSearch) {
+                        IconButton(
+                            onClick = {
+                                val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                    putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                                    putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault())
+                                    putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Speak song or artist name...")
+                                }
+                                try {
+                                    activeSearch = true
+                                    voiceSearchLauncher.launch(intent)
+                                } catch (e: Exception) {
+                                    viewModel.postInAppNotification("Speech recognition is not supported on this device.")
+                                }
+                            },
+                            modifier = Modifier.testTag("voice_search_icon_button")
+                        ) {
+                            Icon(Icons.Default.Mic, contentDescription = "Voice search", tint = colors.textPrimary)
+                        }
                         IconButton(
                             onClick = { activeSearch = true },
                             modifier = Modifier.testTag("search_icon_button")
@@ -241,6 +287,7 @@ fun HomeView(
                                 activeSong = activeSong,
                                 colors = colors,
                                 isMostPlayed = false,
+                                isPlaying = isPlaying,
                                 onSongSelect = { viewModel.playSongFromList(it, favoriteSongs) },
                                 onMoreOptions = {
                                     songSelectedForPlaylist = it
@@ -258,6 +305,7 @@ fun HomeView(
                                 activeSong = activeSong,
                                 colors = colors,
                                 isMostPlayed = true,
+                                isPlaying = isPlaying,
                                 onSongSelect = { viewModel.playSongFromList(it, mostPlayedSongs) },
                                 onMoreOptions = {
                                     songSelectedForPlaylist = it
@@ -594,8 +642,9 @@ fun TabSelector(
         state = listState,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 12.dp, horizontal = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+            .padding(vertical = 6.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         items(tabs) { tab ->
@@ -603,44 +652,44 @@ fun TabSelector(
             
             // Smooth animations for background color, content color, and borders
             val backgroundColor by animateColorAsState(
-                targetValue = if (isSelected) colors.selectedBackground else Color.Transparent,
-                animationSpec = tween(durationMillis = 280),
+                targetValue = if (isSelected) colors.accent.copy(alpha = 0.16f) else colors.surface.copy(alpha = 0.45f),
+                animationSpec = tween(durationMillis = 240),
                 label = "TabBgColor"
             )
             
             val contentColor by animateColorAsState(
                 targetValue = if (isSelected) colors.accent else colors.textSecondary.copy(alpha = 0.85f),
-                animationSpec = tween(durationMillis = 280),
+                animationSpec = tween(durationMillis = 240),
                 label = "TabContentColor"
             )
 
             // Dynamic scale/size for active and elegant response
             val iconSizeMultiplier by animateDpAsState(
-                targetValue = if (isSelected) 18.dp else 16.dp,
-                animationSpec = spring(dampingRatio = 0.65f, stiffness = 300f),
+                targetValue = if (isSelected) 18.dp else 15.dp,
+                animationSpec = spring(dampingRatio = 0.62f, stiffness = 320f),
                 label = "TabIconSize"
             )
 
-            val borderAlpha by animateColorAsState(
-                targetValue = if (isSelected) colors.accent.copy(alpha = 0.4f) else Color.Transparent,
-                animationSpec = tween(durationMillis = 350),
+            val borderColor by animateColorAsState(
+                targetValue = if (isSelected) colors.accent.copy(alpha = 0.5f) else colors.textSecondary.copy(alpha = 0.12f),
+                animationSpec = tween(durationMillis = 240),
                 label = "TabBorder"
             )
 
             Row(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(24.dp))
+                    .clip(RoundedCornerShape(16.dp))
                     .background(backgroundColor)
                     .border(
                         width = 1.dp,
-                        color = borderAlpha,
-                        shape = RoundedCornerShape(24.dp)
+                        color = borderColor,
+                        shape = RoundedCornerShape(16.dp)
                     )
                     .clickable { onSelected(tab) }
-                    .padding(horizontal = 14.dp, vertical = 8.dp)
+                    .padding(horizontal = 12.dp, vertical = 7.dp)
                     .testTag("tab_$tab"),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
             ) {
                 // Determine premium icon matching the tab
                 val itemIcon = when (tab) {
@@ -849,7 +898,7 @@ fun SongsTabContent(
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 80.dp)
+                contentPadding = PaddingValues(top = 4.dp, bottom = 80.dp)
             ) {
                 items(songs, key = { it.id }) { song ->
                     val isActive = (activeSong?.id == song.id)
@@ -857,9 +906,9 @@ fun SongsTabContent(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 1.dp)
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(if (isActive) colors.selectedBackground.copy(alpha = 0.8f) else Color.Transparent)
+                            .background(if (isActive) colors.accent.copy(alpha = 0.12f) else Color.Transparent)
                             .combinedClickable(
                                 onClick = { onSongSelect(song) },
                                 onLongClick = { onFavoriteToggle(song) }
@@ -869,14 +918,14 @@ fun SongsTabContent(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Art Thumbnail
+                            // Art Thumbnail (High-fidelity 46dp size)
                             Box(
                                 modifier = Modifier
-                                    .size(50.dp)
-                                    .clip(RoundedCornerShape(12.dp))
+                                    .size(46.dp)
+                                    .clip(RoundedCornerShape(8.dp))
                                     .background(safeParseColor(song.artworkColorHex)),
                                 contentAlignment = Alignment.Center
                             ) {
@@ -889,22 +938,33 @@ fun SongsTabContent(
                                 )
                             }
 
-                            Spacer(modifier = Modifier.width(16.dp))
+                            Spacer(modifier = Modifier.width(12.dp))
 
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = song.title,
-                                    color = if (isActive) colors.accent else colors.textPrimary,
-                                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
-                                    fontSize = 15.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (isActive) {
+                                        val isPlayingFlowState by viewModel.isPlaying.collectAsState()
+                                        Icon(
+                                            imageVector = if (isPlayingFlowState) Icons.Default.VolumeUp else Icons.Default.VolumeMute,
+                                            contentDescription = "Playing state",
+                                            tint = colors.accent,
+                                            modifier = Modifier.size(15.dp).padding(end = 4.dp)
+                                        )
+                                    }
+                                    Text(
+                                        text = song.title,
+                                        color = if (isActive) colors.accent else colors.textPrimary,
+                                        fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
+                                        fontSize = 14.5.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(1.dp))
                                 Text(
                                     text = song.artist,
                                     color = colors.textSecondary,
-                                    fontSize = 13.sp,
+                                    fontSize = 12.5.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -989,6 +1049,7 @@ fun FavoritesTabContent(
     activeSong: Song?,
     colors: ColorPalette,
     isMostPlayed: Boolean = false,
+    isPlaying: Boolean = false,
     onSongSelect: (Song) -> Unit,
     onMoreOptions: (Song) -> Unit,
     onFavoriteToggle: (Song) -> Unit
@@ -1080,7 +1141,7 @@ fun FavoritesTabContent(
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 80.dp)
+                    contentPadding = PaddingValues(top = 4.dp, bottom = 80.dp)
                 ) {
                     items(songs, key = { it.id }) { song ->
                         val isActive = (activeSong?.id == song.id)
@@ -1088,9 +1149,9 @@ fun FavoritesTabContent(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 2.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(if (isActive) colors.selectedBackground.copy(alpha = 0.8f) else Color.Transparent)
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isActive) colors.accent.copy(alpha = 0.12f) else Color.Transparent)
                                 .combinedClickable(
                                     onClick = { onSongSelect(song) },
                                     onLongClick = { onFavoriteToggle(song) }
@@ -1100,14 +1161,14 @@ fun FavoritesTabContent(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                // Art Thumbnail
+                                // Art Thumbnail (High-fidelity 46dp size)
                                 Box(
                                     modifier = Modifier
-                                        .size(50.dp)
-                                        .clip(RoundedCornerShape(12.dp))
+                                        .size(46.dp)
+                                        .clip(RoundedCornerShape(8.dp))
                                         .background(safeParseColor(song.artworkColorHex)),
                                     contentAlignment = Alignment.Center
                                 ) {
@@ -1120,35 +1181,50 @@ fun FavoritesTabContent(
                                     )
                                 }
 
-                                Spacer(modifier = Modifier.width(16.dp))
+                                Spacer(modifier = Modifier.width(12.dp))
 
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = song.title,
-                                        color = if (isActive) colors.accent else colors.textPrimary,
-                                        fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
-                                        fontSize = 15.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        if (isActive) {
+                                            Icon(
+                                                imageVector = if (isPlaying) Icons.Default.VolumeUp else Icons.Default.VolumeMute,
+                                                contentDescription = "Playing state",
+                                                tint = colors.accent,
+                                                modifier = Modifier.size(15.dp).padding(end = 4.dp)
+                                            )
+                                        }
+                                        Text(
+                                            text = song.title,
+                                            color = if (isActive) colors.accent else colors.textPrimary,
+                                            fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
+                                            fontSize = 14.5.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(1.dp))
                                     Text(
                                         text = song.artist,
                                         color = colors.textSecondary,
-                                        fontSize = 13.sp,
+                                        fontSize = 12.5.sp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }
 
                                 // Right actions (dropdown overflow menu)
-                                IconButton(onClick = { onMoreOptions(song) }) {
-                                    Icon(
-                                        imageVector = Icons.Default.MoreVert,
-                                        contentDescription = "More",
-                                        tint = colors.textSecondary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.End) {
+                                    IconButton(
+                                        onClick = { onMoreOptions(song) },
+                                        modifier = Modifier.size(32.dp).padding(0.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.MoreVert,
+                                            contentDescription = "More",
+                                            tint = colors.textSecondary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
